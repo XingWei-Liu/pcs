@@ -490,18 +490,18 @@ clusterSetup.step.clusterNameNodes = function(){
 clusterSetup.step.clusterSettings = function(clusterName, nodesNames, actions){
   clusterSetup.step.set({
     stepForm: "cluster-settings",
-    title: "Create cluster "+clusterName+": Settings",
+    title: translate("Create cluster")+clusterName+":" + translate("Settings"),
     buttons: [
       {
-        text: "Back",
+        text: translate("Back"),
         click: actions.back,
       },
       {
-        text: "Create cluster",
+        text: translate("Create cluster"),
         click: actions.create,
       },
       {
-        text: "Cancel",
+        text: translate("Cancel"),
         click: actions.cancel,
       },
     ],
@@ -714,7 +714,7 @@ clusterSetup.submit.run = function(useAdvancedOptions){
       },
       {
         confirm: function(msgs){
-          return tools.submit.confirmForce("setup cluster", msgs);
+          return tools.submit.confirmForce(translate("setup cluster"), msgs);
         },
       }
     );

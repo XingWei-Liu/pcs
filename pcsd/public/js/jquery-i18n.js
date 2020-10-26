@@ -294,7 +294,16 @@ let xz_lang = {
     ],
     'Add_Role': [
     '添加角色',
-    'Add_Role']
+    'Add_Role'],
+    'Back': [
+    '返回',
+    'Back'],
+    'Settings': [
+    '设置',
+    'Settings'],
+    'setup cluster': [
+    '新建集群',
+    'setup cluster']
 };
 function translate(name) {
     let content = xz_lang[name][lang_type];
