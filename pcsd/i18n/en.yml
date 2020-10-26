@@ -1,0 +1,261 @@
+post:
+  Username: Username
+  Password: Password
+  Login: Login
+  NODES: NODES
+  RESOURCES: RESOURCES
+  PERMISSIONS: PERMISSIONS
+  FENCE_DEVICES: FENCE DEVICES
+  ACLS: ACLS
+  CLUSTER_PROPERTIES: CLUSTER PROPERTIES
+  MANAGE_CLUSTERS: MANAGE CLUSTERS
+  Logout: Logout
+  All: All
+  Remove: Remove
+  Add_Existing: Add Existing
+  Destroy: Destroy
+  Create_New: Create New
+  INFORMATION_ABOUT_CLUSTERS: INFORMATION ABOUT CLUSTERS
+  SACTVMDCI: Select a cluster to view more detailed cluster information
+  NAME: NAME
+  Cluster: Cluster
+  Nodes: Nodes
+  NODE: NODE
+  STATUS: STATUS
+  QUORUM: QUORUM
+  Resources: Resources
+  RESOURCE: RESOURCE
+  No_resources: No_resources
+  Fence_devices: FENCE-DEVICES
+  Fence_device: FENCE-DEVICE
+  No_fence_devices: No fence devices
+  Add: Add
+  Edit_Node: Edit Node
+  Pacemaker_Maintanence: Pacemaker Maintanence
+  Pacemaker_Connected: Pacemaker Connected
+  Pacemaker_Standby: Pacemaker Standby
+  Pacemaker_Not_Connected: Pacemaker Not Connected
+  Corosync_Connected: Corosync Connected
+  Corosync_Not_Connected: Corosync Not Connected
+  Start: Start
+  Stop: Stop
+  Restart: Restart
+  Unstandby: Unstandby
+  Standby: Standby
+  Unmaintenance: Unmaintenance
+  Maintenance: Maintenance
+  Configure_Fencing: Configure Fencing
+  Manage: Manage
+  Select_Cluster: Select Cluster
+  Clusters: Clusters
+  Cluster_Daemons: Cluster Daemons
+  Running_Resources: Running Resources
+  NONE: NONE
+  Resource_Location_Preferences: Resource Location Preferences
+  Node_Attributes: Node Attributes
+  Attribute: Attribute
+  Value: Value
+  Remove: Remove
+  Fence_Levels: Fence_Levels
+  Level: Level
+  Score: Score
+  Node_ID: Node_ID
+  Uptime: Uptime
+  Utilization_Attribute: Utilization Attribute
+  Node: Node
+  Create_Group: Create Group
+  Resource: Resource
+  Fence_Device: Fence Device
+  Edit: Edit
+  NO_RESOURCES_IN_CLUSTER: NO RESOURCES IN CLUSTER
+  NO_FENCE_DEVICE_IN_CLUSTER: NO FENCE DEVICE IN CLUSTER
+  TYPE: TYPE
+  CLUSTER_PROPERTIES: CLUSTER PROPERTIES
+  Hide_advanced_settings: Hide advanced settings
+  Show_advanced_settings: Show advanced settings
+  Apply_Changes: Apply Changes
+  Refresh: Refresh
+  No_cluster_properties_available: No cluster properties available
+  Edit_ACL_Role: Edit ACL Role
+  ROLE: ROLE
+  Role_Name: Role Name
+  Role_Description: Role Description
+  Permissions: Permissions
+  Type: Type
+  Read: Read
+  Write: Write
+  Deny: Deny
+  Users_Assigned: Users Assigned
+  User_Name: User Name
+  Groups_Assigned: Groups Assigned
+  Group: Group
+  Optional_Arguments: Optional Arguments
+  Cleanup: Cleanup 
+  Enable: Enable
+  Disable: Disable
+  Unmanage: Unmanage
+  Clone: Clone
+  Unclone: Unclone
+  Node_Rule: Node/Rule
+  Resource_Ordering_Preferences : Resource Ordering Preferences
+  Action: Action
+  Before_After: Before/After
+  NONE: NONE
+  starts: starts
+  promotes: promotes
+  demotes: demotes
+  stops: stops
+  after: after
+  before: before
+  Resource_Ordering_Set_Preferences: Resource Ordering Set Preferences
+  Preference_Name_Set_of_Resources: Preference Name/Set of Resources
+  New_Set: New Set
+  Set: Set
+  Resource_Colocation_Preferences: Resource Colocation Preferences
+  Together_Apart: Together/Apart
+  Together: Together
+  Apart: Apart
+  Resource_Colocation_Set_Preferences: Resource Colocation Set Preferences
+  Resource_Ticket_Preferences: Resource Ticket Preferences
+  Ticket: Ticket
+  Resource_Role: Resource Role
+  Loss_Policy: Loss Policy
+  Started: Started
+  Stopped: Stopped
+  Master: Master
+  Slave: Slave
+  fence: fence
+  stop: stop
+  demote: demote
+  Resource_Ticket_Set_Preferences: Resource Ticket Set Preferences
+  freeze1: freeze1
+  Resource_Meta_Attributes: Resource Meta Attributes
+  Meta_Attribute: Meta Attribute
+  Value: Value
+  Current_Location: Current Location
+  Promotable_Clone: Promotable Clone
+  Create_clone: Create clone
+  Create_promotable: Create promotable
+  Update_group: Update group
+  Ungroup: Ungroup
+  Class_Provider: Class/Provider
+  Resource_Group: Resource Group
+  Resource_ID: Resource ID
+  Disabled: Disabled
+  Utilization_Attributes: Utilization Attributes
+  Edit_Resource: Edit Resource
+  Fence_Device: Fence Device
+  Enter_the_name_of_a_node_in_a_cluster_that_you_would_like_to_manage: Enter the name of a node in a cluster that you would like to manage
+  Node_Name: Node Name
+  Enter_the_names_of_the_nodes_you_would_like_to_use_to_create_a_cluster: Enter the names of the nodes you would like to use to create a cluster
+  Cluster_Name: Clusetr Name
+  More_nodes: More nodes...
+  PERMISSIONS_FOR_CLUSTER: PERMISSIONS FOR CLUSTER
+  Name: Name
+  Please_specify_the_count_of_links_that_is_compatible_with_this_cluster: Please specify the count of links that is compatible with this cluster
+  Node_Addresses: Node Addresses
+  Start_the_Node: Start the Node
+  Fence_Instance_Name: Fence Instance Name
+  Bad_username_or_password: Bad username or password
+  displaying: displaying
+  all: all
+  only_issues: only issues
+  Running: Running
+  not_Authorized: not Authorized
+  Unknown: Unknown
+  unknown: unknown
+  issues: issues
+  CLUSTER: CLUSTER
+  Add_Fence_Device: Add Fence Device
+  login_expired: Your session has expired. Log in again, please
+  authenticate_required: Enter password for user 'hacluster' to authenticate nodes
+  Authentication_failed: Authentication on some nodes failed.
+  Use_custom_address_and_port: Use custom address(es) and port(s)
+  Dialogue_custom_Node_Note: For each node you can specify an address and a port via which pcsd will communicate with the node. If an address is not specified the node's name will be used. If a port is not specified 2224 will be used.
+  Group_Name: Group Name
+  Change_order_of_resources: Change order of resources
+  Create_Fence_Instance: Create Fence Instance
+  Dialogue_remove_cluster: Are you sure you want to remove the following cluster(s) from the GUI? (This only removes the cluster from the GUI, it does not stop the cluster from running.)
+  Dialogue_destroy_cluster: Are you sure you want to destroy the following cluster?
+  Link: Link
+  Addresses: Addresses
+  Options: Options
+  Port: Port
+  Ping_Interval: Ping_Interval
+  Ping_Presion: Ping_Presion
+  Ping_Timeout: Ping_Timeout
+  Ping_Count: Ping_Count
+  Transport: Transport
+  SBD_service_status: SBD service status
+  INSTALLED: INSTALLED
+  ENABLED: ENABLED
+  RUNNING: RUNNING
+  Create_Resource: Create Resource
+  Addresses_and_Links: Addresses and Links
+  Add_link: Add link
+  Quorum: Quorom
+  Totem: Totem
+  Link_Priority: Link Priority
+  Ping_Precision: Ping Precision
+  Pong_Count: Pong Count
+  Transport_options: Transport options
+  IP_Version: IP Version
+  PMTUd_Interval: PMTUD Interval
+  Link_Mode: Link Mode
+  Compression_options: Compression options
+  Model: Model
+  Threshold: Threshold
+  bytes: bytes
+  Crypto_options: Crypto options
+  Hash: Hash
+  Cipher: Cipher
+  Default: Default
+  IPv4_if_available_IPv6_otherwise: IPv4 if available IPv6 otherwise
+  IPv6_if_available_IPv4_otherwise: IPv6 if available IPv4 otherwise
+  passive: passive
+  active: active
+  round_robin: round robin
+  Auto_Tie_Breaker: Auto Tie Breaker
+  Last_Man_Standing: Last Man Standing
+  Last_Man_Standing_Window: Last Man Standing Window
+  Wait_for_All: Wait for all
+  turn_on: turn on
+  turn_off: turn off
+  Consensus_Timeout: Consensus Timeout
+  Downcheck_Timeout: Downcheck Timeout
+  Fail_Receive_Constant: Fail Receive Constant
+  Heartbeat_Failures_Allowed: Heartbeat Failures Allowed
+  Hold_Timeout: Hold Timeout
+  Join_Timeout: Join Timeout 
+  Max_Messages: Max Messages
+  Max_Network_Delay: Max Network Delay
+  Merge_Timeout: Merge Timeout
+  Miss_Count_Constant: Miss Count Constant
+  Send_Join_Timeout: Send Join Timeout
+  Seqno_Unchanged_Constant: Seqno Unchanged Constant
+  Token_Timeout: Token Timeout
+  Token_Coefficient: Token Coefficient
+  Token_Retransmit_Timeout: Token Retransmit Timeout
+  Token_Retransmits_Before_Loss_Constant: Token Retransmits Before Loss Constant
+  Window_Size: Window Size
+  Are_you_sure_you_want_to_remove_the_following_nodes: Are you sure you want to remove the following nodes
+  Are_you_sure_you_want_to_remove_the_following_resources: Are you sure you want to remove the following resources
+  Are_you_sure_you_want_to_remove_the_following_ACL_roles: Are you sure you want to remove the following ACL roles
+  Enforce_removal: Enforce removal
+  Specify_watchdog_devices_for_nodes: Specify watchdog devices for nodes
+  SBD_options: SBD options
+  SBD_DELAY_START: SBD DELAY START
+  SBD_STARTMODE: SBD STARTMODE
+  SBD_WATCHDOG_TIMEOUT: SBD WATCHDOG TIMEOUT
+  ignore_offline_nodes: ignore offline nodes
+  Are_you_sure_you_want_to_disable_SBD: Are you sure you want to disable SBD
+  SBD_configuration: SBD configuration
+  SBD_watchdogs: SBD watchdogs
+  WATCHDOG: WATCHDOG
+  add_same_cluster: The cluster name %1 has already been added. You may not add two clusters with the same name.
+  add_same_node: The node %1 is already a part of the %2 cluster. You may not add a node to two different clusters.
+  Please_repeat_the_last_action_if_appropriate: Please repeat the last action if appropriate
+  Configuaration_conflict_detected: Configuration conflict detected.Some nodes had a newer configuration than the local node. Local node's configuration was updated.%1.
+  Unabled_to_save_settings: Unable to save settings on local cluster node(s) %1. Make sure pcsd is running on the nodes and the nodes are authorized.
+  Errors: Errors
+  Totem_consensus: This timeout specifies in milliseconds how long to wait for consensus to be achieved before starting a new round of membership configuration. The minimum value for consensus must be 1.2 * token. This value will be automatically calculated at 1.2 * token if the user doesn't specify a consensus value.<br/><br/>For two node clusters, a consensus larger than the join timeout but less than token is safe. For three node or larger clusters, consensus should be larger than token. There is an increasing risk of odd membership changes, which still guarantee virtual synchrony, as node count grows if consensus is less than token.<br/><br/>The default is 1200 milliseconds.

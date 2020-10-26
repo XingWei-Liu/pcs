@@ -1,0 +1,31 @@
+# Required version of pylint: 2.4.1
+# This project should not containt any issues reported by the required version
+# of pylint when using this command to run the linter on the whole project:
+# $ ./run_pylint.sh
+
+[MASTER]
+extension-pkg-whitelist=lxml.etree,pycurl
+
+[MESSAGES CONTROL]
+disable=missing-docstring, fixme, bad-continuation
+# Everything in module context is a constant, but our naming convetion allows
+# constants to have same name format as variables
+const-rgx=(([A-Z_][A-Z0-9_]*)|(__.*__))|([a-z_][a-z0-9_]*)$
+
+[DESIGN]
+max-module-lines=1500
+max-args=8
+max-parents=10
+min-public-methods=0
+
+[BASIC]
+good-names=e, i, op, ip, el, maxDiff, cm, ok, T, dr
+
+[VARIABLES]
+# A regular expression matching the name of dummy variables (i.e. expectedly
+# not used).
+dummy-variables-rgx=_$|dummy
+
+[FORMAT]
+# Maximum number of characters on a single line.
+max-line-length=80

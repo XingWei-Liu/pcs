@@ -1,0 +1,252 @@
+<div id="dialog_login" style="display:none;">
+  <form id="login_form">
+    <div><%=t.post.login_expired%></div>
+    <div id="login_form_denied" style="color:red; display:none;">
+      <%= t.post.Bad_username_or_password%>
+    </div>
+    <table>
+      <tr>
+        <td><label for="login_form_username"><%= t.post.Username%>:</label></td>
+        <td><input type="text" id="login_form_username" name="username"></td>
+      </tr>
+      <tr>
+        <td><label for="login_form_password"><%= t.post.Password%>:</label></td>
+        <td><input type="password" id="login_form_password" name="password"></td>
+      </tr>
+    </table>
+  </form>
+</div>
+
+<div id="auth_nodes" style="display:none;">
+  <form id="auth_nodes_form">
+    <%= t.post.authenticate_required%><br>
+    <table class="err_msg_table" style="width: 100%">
+      <tr><td align="center" style="color: red"><span id="auth_failed_error_msg" style="display:none;"><%=t.post.Authentication_failed%></span></td></tr>
+    </table>
+    <p class="addr_port" style="max-width: 40em">
+      <%= t.post.Dialogue_custom_Node_Note%>
+    </p>
+    <table id="auth_nodes_list">
+    </table>
+    <div id="same_pass"><label><input type="checkbox" name="all" onchange="if ($(this).is(':checked')) {$('#auth_nodes_form').find('.password').each(function(){$(this).hide()}); $('#pass_for_all').show();} else {$('#auth_nodes_form').find('.password').each(function(){$(this).show()}); $('#pass_for_all').hide();}"> <%= t.post.Use_same_password_for_all_nodes%>:</label>
+      <input type="password" name="pass-all" id="pass_for_all" style="display: none;"></div>
+    <div>
+      <label>
+        <input type="checkbox" name="custom_addr_port"
+          onchange="if ($(this).is(':checked')) { $('#auth_nodes_form').find('.addr_port').show(); } else { $('#auth_nodes_form').find('.addr_port').hide(); };"
+        >
+        <%= t.post.Use_custom_address_and_port%>
+      </label>
+    </div>
+  </form>
+</div>
+
+<div id="dialog_verify_remove_clusters" style="display: none;">
+<p style="font-size:12px;"><%= t.post.Dialogue_remove_cluster%></p>
+  <span class="name_list"></span>
+</div>
+
+<div id="dialog_verify_destroy_cluster" style="display: none;">
+  <p style="font-size:12px;"><%= t.post.Dialogue_destroy_cluster%></p>
+  <span class="name_list"></span>
+  <p style="font-size:14px; color: red;"><%= t.post.destroy_cluster%></p>
+</div>
+
+<div id="dialog_verify_remove_nodes" style="display:none;">
+  <p style="font-size:12px;"><%= t.post.Are_you_sure_you_want_to_remove_the_following_nodes%>?</p>
+  <span class="name_list"></span>
+  <table class="msg-box" style="width:100%"><tr><td/></tr></table>
+</div>
+
+<div id="dialog_verify_remove_resources" style="display: none;">
+  <p style="font-size:12px;"><%= t.post.Are_you_sure_you_want_to_remove_the_following_resources%>?</p>
+  <span class="name_list"></span>
+  <input type="checkbox" name="force">
+  <%= t.post.Enforce_removal%>
+</div>
+
+<div id="dialog_verify_remove_acl_roles" style="display:none;">
+<p style="font-size:12px;"><%= t.post.Are_you_sure_you_want_to_remove_the_following_ACL_roles%>?</p>
+  <span class="name_list"></span>
+</div>
+
+<div id="enable_sbd_dialog" style="display:none;">
+  <form id="enable_sbd_form">
+    <table>
+      <tr>
+        <td class="darkdatatable_header">
+          <%= t.post.Specify_watchdog_devices_for_nodes%>:
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <table id="watchdog_table">
+          </table>
+        </td>
+      </tr>
+    </table>
+    <table style="margin-top: 20px;">
+      <tr>
+        <td class="darkdatatable_header">
+          <%= t.post.SBD_options%>:
+        </td>
+      </tr>
+      <tr>
+        <td>
+          <table id="sbd_options">
+            <tr>
+              <td><%= t.post.SBD_DELAY_START%></td>
+              <td>
+                <select name="config[SBD_DELAY_START]">
+                  <option value="" selected>(default)</option>
+                  <option value="yes">yes</option>
+                  <option value="no">no</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><%= t.post.SBD_STARTMODE%></td>
+              <td>
+                <select name="config[SBD_STARTMODE]">
+                  <option value="" selected>(default)</option>
+                  <option value="clean">clean</option>
+                  <option value="always">always</option>
+                </select>
+              </td>
+            </tr>
+            <tr>
+              <td><%= t.post.SBD_WATCHDOG_TIMEOUT%></td>
+              <td>
+                <input
+                    type="text"
+                    name="config[SBD_WATCHDOG_TIMEOUT]"
+                    placeholder="5"
+                />
+              </td>
+            </tr>
+          </table>
+        </td>
+      </tr>
+    </table>
+    <table>
+      <tr>
+        <td>
+          <label for="ignore_offline_nodes_enable_sbd">
+            <%= t.post.ignore_offline_nodes%>
+          </label>
+        </td>
+        <td>
+          <input
+              id="ignore_offline_nodes_enable_sbd"
+              type="checkbox"
+              name="ignore_offline_nodes"
+          />
+        </td>
+      </tr>
+    </table>
+  </form>
+</div>
+
+<div id="disable_sbd_dialog" style="display:none;">
+  <form id="disable_sbd_form">
+    <%= t.post.Are_you_sure_you_want_to_disable_SBD%>?
+    <table>
+      <tr>
+        <td>
+          <label for="ignore_offline_nodes_disable_sbd">
+            <%= t.post.ignore_offline_nodes%>
+          </label>
+        </td>
+        <td>
+          <input
+              id="ignore_offline_nodes_disable_sbd"
+              type="checkbox"
+              name="ignore_offline_nodes"
+          />
+        </td>
+      </tr>
+    </table>
+  </form>
+</div>
+
+<div id="sbd_status_dialog" style="display:none;">
+  <table>
+    <tr>
+      <td class="darkdatatable_header"><%= t.post.SBD_service_status%></td>
+    </tr>
+    <tr>
+      <td>
+        <table class="darkdatatable">
+          <tr>
+            <th><%= t.post.NODE%></th>
+            <th><%= t.post.INSTALLED%></th>
+            <th><%= t.post.ENABLED%></th>
+            <th><%= t.post.RUNNING%></th>
+          </tr>
+          {{#each node in Pcs.nodesController}}
+          <tr>
+            <td>{{node.name}}</td>
+            <td>{{bool-to-icon node.is_sbd_installed}}</td>
+            <td>{{bool-to-icon node.is_sbd_enabled}}</td>
+            <td>{{bool-to-icon node.is_sbd_running}}</td>
+          </tr>
+          {{/each}}
+        </table>
+      </td>
+    </tr>
+  </table>
+  {{#if Pcs.is_sbd_enabled_or_running}}
+  <table style="margin-top: 20px;">
+    <tr>
+      <td class="darkdatatable_header"><%= t.post.SBD_configuration%></td>
+    </tr>
+    <tr>
+      <td>
+        {{{Pcs.sbd_config_table}}}
+      </td>
+    </tr>
+  </table>
+  <table style="margin-top: 20px;">
+    <tr>
+      <td class="darkdatatable_header"><%= t.post.SBD_watchdogs%></td>
+    </tr>
+    <tr>
+      <td>
+        <table class="darkdatatable">
+          <tr>
+            <th><%= t.post.NODE%></th>
+            <th><%= t.post.WATCHDOG%></th>
+          </tr>
+          {{#each node in Pcs.nodesController}}
+          <tr>
+            <td>{{node.name}}</td>
+            <td>{{node.sbd_watchdog}}</td>
+          </tr>
+          {{/each}}
+        </table>
+      </td>
+    </tr>
+  </table>
+  {{/if}}
+</div>
+
+<div id="add_group" style="display: none;">
+  <form method=POST onkeypress="if (event.keyCode == 13) {$(this).parent().parent().find('.ui-dialog-buttonpane button:eq(1)').trigger('click');return false;} " action="/resource_group_add">
+    <table>
+      <tr>
+        <td><%= t.post.Group_Name%>:</td>
+        <td>
+          <input name="resource_group" type="text" />
+        </td>
+      </tr>
+      <tr>
+        <td style="vertical-align: top;"><%= t.post.Change_order_of_resources%>:</td>
+        <td>
+          <table id="new_group_resource_list" class="sortable-table">
+            <tbody></tbody>
+          </table>
+        </td>
+      </tr>
+    </table>
+  </form>
+</div>

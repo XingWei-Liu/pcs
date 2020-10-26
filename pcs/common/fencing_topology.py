@@ -1,0 +1,3 @@
+TARGET_TYPE_NODE = "node"
+TARGET_TYPE_REGEXP = "regexp"
+TARGET_TYPE_ATTRIBUTE = "attribute"

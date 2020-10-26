@@ -1,0 +1,1600 @@
+# pylint: disable=too-many-lines
+from collections import Counter, defaultdict, namedtuple
+from itertools import zip_longest
+
+from pcs.common import report_codes
+from pcs.lib import reports, validate
+from pcs.lib.corosync import constants
+from pcs.lib.corosync.node import(
+    ADDR_IPV4,
+    ADDR_IPV6,
+    ADDR_FQDN,
+    ADDR_UNRESOLVABLE,
+    get_address_type
+)
+
+_QDEVICE_NET_REQUIRED_OPTIONS = (
+    "algorithm",
+    "host",
+)
+_QDEVICE_NET_OPTIONAL_OPTIONS = (
+    "connect_timeout",
+    "force_ip_version",
+    "port",
+    "tie_breaker",
+)
+
+class _LinkAddrType(namedtuple("_LinkAddrType", "link addr_type")):
+    pass
+
+
+def create(
+    cluster_name, node_list, transport, ip_version, force_unresolvable=False
+):
+    # pylint: disable=too-many-locals
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-statements
+    """
+    Validate creating a new minimalistic corosync.conf
+
+    string cluster_name -- the name of the new cluster
+    list node_list -- nodes of the new cluster; dict: name, addrs
+    string transport -- corosync transport used in the new cluster
+    string ip_version -- which IP family node addresses should be
+    bool force_unresolvable -- if True, report unresolvable addresses as
+        warnings instead of errors
+    """
+    # cluster name and transport validation
+    validators = [
+        validate.ValueNotEmpty(
+            "name", None, option_name_for_report="cluster name"
+        ),
+        validate.ValueCorosyncValue("name"),
+        validate.ValueIn("transport", constants.TRANSPORTS_ALL),
+        validate.ValueCorosyncValue("transport"),
+    ]
+    report_items = validate.ValidatorAll(validators).validate({
+        "name": cluster_name,
+        "transport": transport
+    })
+
+    # nodelist validation
+    get_addr_type = _addr_type_analyzer()
+    all_names_usable = True # can names be used to identifying nodes?
+    all_names_count = defaultdict(int)
+    all_addrs_count = defaultdict(int)
+    addr_types_per_node = []
+    unresolvable_addresses = set()
+    nodes_with_empty_addr = set()
+    # First, validate each node on its own. Also extract some info which will
+    # be needed when validating the nodelist and inter-node dependencies.
+    for i, node in enumerate(node_list, 1):
+        report_items.extend(
+            validate.ValidatorAll(_get_node_name_validators(i)).validate(node)
+        )
+        if "name" in node and node["name"]:
+            # Count occurrences of each node name. Do not bother counting
+            # missing or empty names. They must be fixed anyway.
+            all_names_count[node["name"]] += 1
+        else:
+            all_names_usable = False
+        # Cannot use node.get("addrs", []) - if node["addrs"] == None then
+        # the get returns None and len(None) raises an exception.
+        addr_count = len(node.get("addrs") or [])
+        if transport in constants.TRANSPORTS_KNET + constants.TRANSPORTS_UDP:
+            if transport in constants.TRANSPORTS_KNET:
+                min_addr_count = constants.LINKS_KNET_MIN
+                max_addr_count = constants.LINKS_KNET_MAX
+            else:
+                min_addr_count = constants.LINKS_UDP_MIN
+                max_addr_count = constants.LINKS_UDP_MAX
+            if (
+                addr_count < min_addr_count
+                or
+                addr_count > max_addr_count
+            ):
+                report_items.append(
+                    reports.corosync_bad_node_addresses_count(
+                        addr_count,
+                        min_addr_count,
+                        max_addr_count,
+                        node_name=node.get("name"),
+                        node_index=i
+                    )
+                )
+        addr_types = []
+        # Cannot use node.get("addrs", []) - if node["addrs"] == None then
+        # the get returns None and len(None) raises an exception.
+        for link_index, addr in enumerate(node.get("addrs") or []):
+            if addr == "":
+                if node.get("name"):
+                    # No way to report name if none is set. Unnamed nodes cause
+                    # errors anyway.
+                    nodes_with_empty_addr.add(node.get("name"))
+                continue
+            all_addrs_count[addr] += 1
+            _validate_addr_type(
+                addr, link_index, ip_version, get_addr_type,
+                # these will get populated in the function
+                addr_types, unresolvable_addresses, report_items
+            )
+        addr_types_per_node.append(addr_types)
+    # Report all empty and unresolvable addresses at once instead on each own.
+    if nodes_with_empty_addr:
+        report_items.append(
+            reports.node_addresses_cannot_be_empty(nodes_with_empty_addr)
+        )
+    report_items += _report_unresolvable_addresses_if_any(
+        unresolvable_addresses, force_unresolvable
+    )
+
+    # Reporting single-node errors finished.
+    # Now report nodelist and inter-node errors.
+    if not node_list:
+        report_items.append(reports.corosync_nodes_missing())
+    non_unique_names = {
+        name for name, count in all_names_count.items() if count > 1
+    }
+    if non_unique_names:
+        all_names_usable = False
+        report_items.append(
+            reports.node_names_duplication(non_unique_names)
+        )
+    non_unique_addrs = {
+        addr
+        for addr, count in all_addrs_count.items()
+        # empty strings are not valid addresses and they are reported
+        # from a different piece of code in a different report
+        if count > 1 and addr != ""
+    }
+    if non_unique_addrs:
+        report_items.append(
+            reports.node_addresses_duplication(non_unique_addrs)
+        )
+    if all_names_usable:
+        # Check for errors using node names in their reports. If node names are
+        # ambiguous then such issues cannot be comprehensibly reported so the
+        # checks are skipped.
+        node_addr_count = {}
+        for node in node_list:
+            # Cannot use node.get("addrs", []) - if node["addrs"] == None then
+            # the get returns None and len(None) raises an exception.
+            node_addr_count[node["name"]] = len(node.get("addrs") or [])
+        # Check if all nodes have the same number of addresses. No need to
+        # check that if udp or udpu transport is used as they can only use one
+        # address and that has already been checked above.
+        if (
+            transport not in constants.TRANSPORTS_UDP
+            and
+            len(Counter(node_addr_count.values()).keys()) > 1
+        ):
+            report_items.append(
+                reports.corosync_node_address_count_mismatch(node_addr_count)
+            )
+    # Check mixing IPv4 and IPv6 in one link, node names are not relevant
+    links_ip_mismatch = []
+    for link, addr_types in enumerate(zip_longest(*addr_types_per_node)):
+        if ADDR_IPV4 in addr_types and ADDR_IPV6 in addr_types:
+            links_ip_mismatch.append(link)
+    if links_ip_mismatch:
+        report_items.append(
+            reports.corosync_ip_version_mismatch_in_links(links_ip_mismatch)
+        )
+
+    return report_items
+
+def _get_node_name_validators(node_index):
+    _type = f"node {node_index}"
+    _name = f"node {node_index} name"
+    return [
+        validate.NamesIn(["addrs", "name"], option_type="node"),
+        validate.IsRequiredAll(["name"], option_type=_type),
+        validate.ValueNotEmpty("name", None, option_name_for_report=_name),
+        validate.ValueCorosyncValue("name", option_name_for_report=_name),
+    ]
+
+def _addr_type_analyzer():
+    cache = dict()
+    def analyzer(addr):
+        if addr not in cache:
+            cache[addr] = get_address_type(addr, resolve=True)
+        return cache[addr]
+    return analyzer
+
+def _extract_existing_addrs_and_names(
+    coro_existing_nodes, pcmk_existing_nodes, pcmk_names=True
+):
+    existing_names = set()
+    existing_addrs = set()
+    existing_addr_types_dict = dict()
+    for node in coro_existing_nodes:
+        existing_names.add(node.name)
+        existing_addrs.update(set(node.addrs_plain()))
+        for addr in node.addrs:
+            # If two nodes have FQDN and one has IPv4, we want to keep the IPv4
+            if (
+                addr.type not in (ADDR_FQDN, ADDR_UNRESOLVABLE)
+                or
+                addr.link not in existing_addr_types_dict
+            ):
+                existing_addr_types_dict[addr.link] = addr.type
+    for node in pcmk_existing_nodes:
+        if pcmk_names:
+            existing_names.add(node.name)
+        existing_addrs.add(node.addr)
+    return existing_addrs, existing_addr_types_dict, existing_names
+
+def _validate_addr_type(
+    addr, link_index, ip_version, get_addr_type,
+    # these will get populated in the function
+    addr_types, unresolvable_addresses, report_items
+):
+    addr_types.append(get_addr_type(addr))
+    if get_addr_type(addr) == ADDR_UNRESOLVABLE:
+        unresolvable_addresses.add(addr)
+    elif (
+        get_addr_type(addr) == ADDR_IPV4
+        and
+        ip_version == constants.IP_VERSION_6
+    ):
+        report_items.append(
+            reports.corosync_address_ip_version_wrong_for_link(
+                addr, ADDR_IPV6, link_number=link_index
+            )
+        )
+    elif (
+        get_addr_type(addr) == ADDR_IPV6
+        and
+        ip_version == constants.IP_VERSION_4
+    ):
+        report_items.append(
+            reports.corosync_address_ip_version_wrong_for_link(
+                addr, ADDR_IPV4, link_number=link_index
+            )
+        )
+    report_items += validate.ValueCorosyncValue(
+        "addr", option_name_for_report="node address"
+    ).validate({"addr": addr})
+
+def _report_unresolvable_addresses_if_any(
+    unresolvable_addresses, force_unresolvable
+):
+    if not unresolvable_addresses:
+        return []
+    return [
+        reports.get_problem_creator(
+            force_code=report_codes.FORCE_NODE_ADDRESSES_UNRESOLVABLE,
+            is_forced=force_unresolvable,
+        )(
+            reports.node_addresses_unresolvable,
+            unresolvable_addresses,
+        )
+    ]
+
+def add_nodes(
+    node_list, coro_existing_nodes, pcmk_existing_nodes,
+    force_unresolvable=False
+):
+    # pylint: disable=too-many-locals, too-many-branches, too-many-statements
+    """
+    Validate adding nodes to a config with a nonempty nodelist
+
+    list node_list -- new nodes data; list of dict: name, addrs
+    list coro_existing_nodes -- existing corosync nodes; list of CorosyncNode
+    list pcmk_existing_nodes -- existing pacemaker nodes; list of PacemakerNode
+    bool force_unresolvable -- if True, report unresolvable addresses as
+        warnings instead of errors
+    """
+    # extract info from existing nodes
+    existing_addrs, existing_addr_types_dict, existing_names = (
+        _extract_existing_addrs_and_names(
+            coro_existing_nodes, pcmk_existing_nodes
+        )
+    )
+    existing_addr_types = sorted([
+        _LinkAddrType(link_number, addr_type)
+        for link_number, addr_type in existing_addr_types_dict.items()
+    ])
+    number_of_existing_links = len(existing_addr_types)
+
+    # validation
+    get_addr_type = _addr_type_analyzer()
+    report_items = []
+    new_names_count = defaultdict(int)
+    new_addrs_count = defaultdict(int)
+    new_addr_types_per_node = []
+    links_ip_mismatch_reported = set()
+    unresolvable_addresses = set()
+    nodes_with_empty_addr = set()
+
+    # First, validate each node on its own. Also extract some info which will
+    # be needed when validating the nodelist and inter-node dependencies.
+    for i, node in enumerate(node_list, 1):
+        report_items.extend(
+            validate.ValidatorAll(_get_node_name_validators(i)).validate(node)
+        )
+        if "name" in node and node["name"]:
+            # Count occurrences of each node name. Do not bother counting
+            # missing or empty names. They must be fixed anyway.
+            new_names_count[node["name"]] += 1
+        # Cannot use node.get("addrs", []) - if node["addrs"] == None then
+        # the get returns None and len(None) raises an exception.
+        addr_count = len(node.get("addrs") or [])
+        if addr_count != number_of_existing_links:
+            report_items.append(
+                reports.corosync_bad_node_addresses_count(
+                    addr_count,
+                    number_of_existing_links,
+                    number_of_existing_links,
+                    node_name=node.get("name"),
+                    node_index=i
+                )
+            )
+        addr_types = []
+        # Cannot use node.get("addrs", []) - if node["addrs"] == None then
+        # the get returns None and len(None) raises an exception.
+        for link_index, addr in enumerate(node.get("addrs") or []):
+            if addr == "":
+                if node.get("name"):
+                    # No way to report name if none is set. Unnamed nodes cause
+                    # errors anyway.
+                    nodes_with_empty_addr.add(node.get("name"))
+                continue
+            new_addrs_count[addr] += 1
+            addr_types.append(get_addr_type(addr))
+            if get_addr_type(addr) == ADDR_UNRESOLVABLE:
+                unresolvable_addresses.add(addr)
+            # Check matching IPv4 / IPv6 in existing links. FQDN matches with
+            # both IPv4 and IPv6 as it can resolve to both. Unresolvable is a
+            # special case of FQDN so we don't need to check it.
+            if (
+                link_index < number_of_existing_links
+                and
+                get_addr_type(addr) not in (ADDR_FQDN, ADDR_UNRESOLVABLE)
+                and
+                existing_addr_types[link_index].addr_type != ADDR_FQDN
+                and
+                get_addr_type(addr) != existing_addr_types[link_index].addr_type
+            ):
+                links_ip_mismatch_reported.add(
+                    existing_addr_types[link_index].link
+                )
+                report_items.append(
+                    reports.corosync_address_ip_version_wrong_for_link(
+                        addr,
+                        existing_addr_types[link_index].addr_type,
+                        existing_addr_types[link_index].link,
+                    )
+                )
+            report_items += validate.ValueCorosyncValue(
+                "addr", option_name_for_report="node address"
+            ).validate({"addr": addr})
+
+        new_addr_types_per_node.append(addr_types)
+    # Report all empty and unresolvable addresses at once instead on each own.
+    if nodes_with_empty_addr:
+        report_items.append(
+            reports.node_addresses_cannot_be_empty(nodes_with_empty_addr)
+        )
+    report_items += _report_unresolvable_addresses_if_any(
+        unresolvable_addresses, force_unresolvable
+    )
+
+    # Reporting single-node errors finished.
+    # Now report nodelist and inter-node errors.
+    if not node_list:
+        report_items.append(reports.corosync_nodes_missing())
+    # Check nodes' names and address are unique
+    already_existing_names = existing_names.intersection(new_names_count.keys())
+    if already_existing_names:
+        report_items.append(
+            reports.node_names_already_exist(already_existing_names)
+        )
+    already_existing_addrs = existing_addrs.intersection(new_addrs_count.keys())
+    if already_existing_addrs:
+        report_items.append(
+            reports.node_addresses_already_exist(already_existing_addrs)
+        )
+    non_unique_names = {
+        name for name, count in new_names_count.items() if count > 1
+    }
+    if non_unique_names:
+        report_items.append(
+            reports.node_names_duplication(non_unique_names)
+        )
+    non_unique_addrs = {
+        addr for addr, count in new_addrs_count.items() if count > 1
+    }
+    if non_unique_addrs:
+        report_items.append(
+            reports.node_addresses_duplication(non_unique_addrs)
+        )
+    # Check mixing IPv4 and IPv6 in one link, node names are not relevant,
+    # skip links already reported due to new nodes have wrong IP version
+    existing_links = [x.link for x in existing_addr_types]
+    links_ip_mismatch = []
+    for link_index, addr_types in enumerate(
+            zip_longest(*new_addr_types_per_node)
+    ):
+        if (
+            ADDR_IPV4 in addr_types and ADDR_IPV6 in addr_types
+            and
+            existing_links[link_index] not in links_ip_mismatch_reported
+        ):
+            links_ip_mismatch.append(existing_links[link_index])
+    if links_ip_mismatch:
+        report_items.append(
+            reports.corosync_ip_version_mismatch_in_links(links_ip_mismatch)
+        )
+    return report_items
+
+def remove_nodes(nodes_names_to_remove, existing_nodes, quorum_device_settings):
+    """
+    Validate removing nodes
+
+    iterable nodes_names_to_remove -- list of names of nodes to remove
+    iterable existing_nodes -- list of all existing nodes
+    tuple quorum_device_settings -- output of get_quorum_device_settings
+    """
+    existing_node_names = [node.name for node in existing_nodes]
+    report_items = []
+    for node in set(nodes_names_to_remove) - set(existing_node_names):
+        report_items.append(reports.node_not_found(node))
+
+    if not set(existing_node_names) - set(nodes_names_to_remove):
+        report_items.append(reports.cannot_remove_all_cluster_nodes())
+
+    qdevice_model, qdevice_model_options, _, _ = quorum_device_settings
+    if qdevice_model == "net":
+        tie_breaker_nodeid = qdevice_model_options.get("tie_breaker")
+        if tie_breaker_nodeid not in [None, "lowest", "highest"]:
+            for node in existing_nodes:
+                if (
+                    node.name in nodes_names_to_remove
+                    and
+                    # "4" != 4, convert ids to string to detect a match for sure
+                    str(node.nodeid) == str(tie_breaker_nodeid)
+                ):
+                    report_items.append(
+                        reports.node_used_as_tie_breaker(node.name, node.nodeid)
+                    )
+
+    return report_items
+
+def _check_link_options_count(link_count, max_allowed_link_count):
+    report_items = []
+    # make sure we don't report negative counts
+    link_count = max(link_count, 0)
+    max_allowed_link_count = max(max_allowed_link_count, 0)
+    if link_count > max_allowed_link_count:
+        # link_count < max_allowed_link_count is a valid scenario - for some
+        # links no options have been specified
+        report_items.append(
+            reports.corosync_too_many_links_options(
+                link_count, max_allowed_link_count
+            )
+        )
+    return report_items
+
+def _get_link_options_validators_udp(options, allow_empty_values=False):
+    # This only returns validators checking single values. Add checks for
+    # intervalues relationships as needed.
+    validators = [
+        validate.ValueIpAddress("bindnetaddr"),
+        validate.ValueIn("broadcast", ("0", "1")),
+        validate.ValueIpAddress("mcastaddr"),
+        validate.ValuePortNumber("mcastport"),
+        validate.ValueIntegerInRange("ttl", 0, 255),
+    ]
+    if allow_empty_values:
+        for val in validators:
+            val.empty_string_valid = True
+    return (
+        [
+            validate.NamesIn(constants.LINK_OPTIONS_UDP, option_type="link")
+        ]
+        +
+        _get_unsuitable_keys_and_values_validators(options, option_type="link")
+        +
+        validators
+    )
+
+def _update_link_options_udp(new_options, current_options):
+    report_items = validate.ValidatorAll(
+        _get_link_options_validators_udp(new_options, allow_empty_values=True)
+    ).validate(new_options)
+
+    # default values taken from `man corosync.conf`
+    target_broadcast = _get_option_after_update(
+        new_options, current_options, "broadcast", "0"
+    )
+    target_mcastaddr = _get_option_after_update(
+        new_options, current_options, "mcastaddr", None
+    )
+    if target_broadcast == "1" and target_mcastaddr is not None:
+        report_items.append(
+            reports.prerequisite_option_must_be_disabled(
+                "mcastaddr",
+                "broadcast",
+                option_type="link",
+                prerequisite_type="link"
+            )
+        )
+
+    return report_items
+
+def create_link_list_udp(link_list, max_allowed_link_count):
+    """
+    Validate creating udp/udpu link (interface) list options
+
+    iterable link_list -- list of link options
+    integer max_allowed_link_count -- how many links is defined by addresses
+    """
+    if not link_list:
+        # It is not mandatory to set link options. If an empty link list is
+        # provided, everything is fine and we have nothing to validate.
+        return []
+
+    options = link_list[0]
+    report_items = validate.ValidatorAll(
+        _get_link_options_validators_udp(options, allow_empty_values=False)
+    ).validate(options)
+    # default values taken from `man corosync.conf`
+    if options.get("broadcast", "0") == "1" and "mcastaddr" in options:
+        report_items.append(
+            reports.prerequisite_option_must_be_disabled(
+                "mcastaddr",
+                "broadcast",
+                option_type="link",
+                prerequisite_type="link"
+            )
+        )
+    report_items.extend(
+        _check_link_options_count(len(link_list), max_allowed_link_count)
+    )
+    return report_items
+
+def create_link_list_knet(link_list, max_allowed_link_count):
+    """
+    Validate creating knet link (interface) list options
+
+    iterable link_list -- list of link options
+    integer max_allowed_link_count -- how many links is defined by addresses
+    """
+    if not link_list:
+        # It is not mandatory to set link options. If an empty link list is
+        # provided, everything is fine and we have nothing to validate. It is
+        # also possible to set link options for only some of the links.
+        return []
+
+    report_items = []
+    used_link_number = defaultdict(int)
+    for options in link_list:
+        if "linknumber" in options:
+            used_link_number[options["linknumber"]] += 1
+            if validate.is_integer(
+                options["linknumber"], 0, constants.LINKS_KNET_MAX - 1
+            ):
+                if int(options["linknumber"]) >= max_allowed_link_count:
+                    # first link is link0, hence >=
+                    report_items.append(
+                        # Links are defined by node addresses. Therefore we
+                        # update link options here, we do not create links.
+                        reports.corosync_link_does_not_exist_cannot_update(
+                            options["linknumber"],
+                            link_count=max_allowed_link_count
+                        )
+                    )
+        report_items += _add_link_options_knet(options)
+    non_unique_linknumbers = [
+        number for number, count in used_link_number.items() if count > 1
+    ]
+    if non_unique_linknumbers:
+        report_items.append(
+            reports.corosync_link_number_duplication(non_unique_linknumbers)
+        )
+    report_items.extend(
+        _check_link_options_count(len(link_list), max_allowed_link_count)
+    )
+    return report_items
+
+def _get_link_options_validators_knet(
+    options, allow_empty_values=False, including_linknumber=True
+):
+    # This only returns validators checking single values. Add checks for
+    # intervalues relationships as needed.
+    validators = [
+        validate.ValueIntegerInRange("link_priority", 0, 255),
+        validate.ValuePortNumber("mcastport"),
+        validate.ValueNonnegativeInteger("ping_interval"),
+        validate.ValueNonnegativeInteger("ping_precision"),
+        validate.ValueNonnegativeInteger("ping_timeout"),
+        validate.ValueNonnegativeInteger("pong_count"),
+        validate.ValueIn("transport", ("sctp", "udp")),
+    ]
+
+    if including_linknumber:
+        validators.append(
+            validate.ValueIntegerInRange(
+                "linknumber", 0, constants.LINKS_KNET_MAX - 1
+            )
+        )
+        allowed_options = constants.LINK_OPTIONS_KNET_USER
+    else:
+        allowed_options = [
+            option for option in constants.LINK_OPTIONS_KNET_USER
+            if option != "linknumber"
+        ]
+
+    if allow_empty_values:
+        for val in validators:
+            val.empty_string_valid = True
+    return (
+        [
+            validate.NamesIn(allowed_options, option_type="link")
+        ]
+        +
+        _get_unsuitable_keys_and_values_validators(options, option_type="link")
+        +
+        validators
+    )
+
+def _get_link_options_validators_knet_relations():
+    types = dict(option_type="link", prerequisite_type="link")
+    return [
+        validate.DependsOnOption(["ping_interval"], "ping_timeout", **types),
+        validate.DependsOnOption(["ping_timeout"], "ping_interval", **types),
+    ]
+
+def _add_link_options_knet(options):
+    return validate.ValidatorAll(
+        _get_link_options_validators_knet(
+            options, allow_empty_values=False, including_linknumber=True
+        )
+        +
+        _get_link_options_validators_knet_relations()
+    ).validate(options)
+
+def _update_link_options_knet(new_options, current_options):
+    # Changing linknumber is not allowed in update. It would effectivelly
+    # delete one link and add a new one. Link update is meant for the cases
+    # when there is only one link which cannot be removed and another one
+    # cannot be added.
+
+    # check dependencies in resulting options
+    after_update = {}
+    for option_name in ("ping_interval", "ping_timeout"):
+        option_value = _get_option_after_update(
+            new_options, current_options, option_name, None
+        )
+        if option_value is not None:
+            after_update[option_name] = option_value
+
+    return (
+        validate.ValidatorAll(
+            _get_link_options_validators_knet(
+                new_options, allow_empty_values=True, including_linknumber=False
+            )
+        ).validate(new_options)
+        +
+        validate.ValidatorAll(_get_link_options_validators_knet_relations())
+            .validate(after_update)
+    )
+
+def add_link(
+    node_addr_map, link_options,
+    coro_existing_nodes, pcmk_existing_nodes, linknumbers_existing, transport,
+    ip_version,
+    force_unresolvable=False
+):
+    # pylint: disable=too-many-locals
+    """
+    Validate adding a link
+
+    dict node_addr_map -- key: node name, value: node address for the new link
+    dict link_options -- link options
+    list coro_existing_nodes -- existing corosync nodes; list of CorosyncNode
+    list pcmk_existing_nodes -- existing pacemaker nodes; list of PacemakerNode
+    iterable linknumbers_existing -- all currently existing links (linknumbers)
+    string transport -- corosync transport used in the cluster
+    string ip_version -- ip family defined to be used in the cluster
+    bool force_unresolvable -- if True, report unresolvable addresses as
+        warnings instead of errors
+    """
+    report_items = []
+    # We only support adding one link (that's the "1"), this may change later.
+    number_of_links_to_add = 1
+
+    # Check the transport supports adding links
+    if transport not in constants.TRANSPORTS_KNET:
+        report_items.append(
+            reports.corosync_cannot_add_remove_links_bad_transport(
+                transport,
+                constants.TRANSPORTS_KNET,
+                add_or_not_remove=True,
+            )
+        )
+        return report_items
+
+    # Check the allowed number of links is not exceeded
+    if (
+        len(linknumbers_existing) + number_of_links_to_add
+        >
+        constants.LINKS_KNET_MAX
+    ):
+        report_items.append(
+            reports.corosync_cannot_add_remove_links_too_many_few_links(
+                number_of_links_to_add,
+                len(linknumbers_existing) + number_of_links_to_add,
+                constants.LINKS_KNET_MAX,
+                add_or_not_remove=True,
+            )
+        )
+        # Since only one link can be added there is no point in validating the
+        # link if it cannot be added. If it was possible to add more links at
+        # once, it would make sense to continue walidating them (e.g. adding 4
+        # links to a cluster with 5 links where max number of links is 8).
+        return report_items
+
+    # Check all nodes have their addresses specified
+    existing_addrs, dummy_existing_addr_types_dict, existing_names = (
+        _extract_existing_addrs_and_names(
+            coro_existing_nodes, pcmk_existing_nodes, pcmk_names=False
+        )
+    )
+    report_items += [
+        reports.corosync_bad_node_addresses_count(
+            actual_count=0,
+            min_count=number_of_links_to_add,
+            max_count=number_of_links_to_add,
+            node_name=node
+        )
+        for node in sorted(existing_names - set(node_addr_map.keys()))
+    ]
+    report_items += [
+        reports.node_not_found(node)
+        for node in sorted(set(node_addr_map.keys()) - existing_names)
+    ]
+
+    get_addr_type = _addr_type_analyzer()
+    unresolvable_addresses = set()
+    nodes_with_empty_addr = set()
+    addr_types = []
+    for node_name, node_addr in node_addr_map.items():
+        if node_addr == "":
+            nodes_with_empty_addr.add(node_name)
+        else:
+            _validate_addr_type(
+                node_addr, None, ip_version, get_addr_type,
+                # these will get appended in the function
+                addr_types, unresolvable_addresses, report_items
+            )
+    if nodes_with_empty_addr:
+        report_items.append(
+            reports.node_addresses_cannot_be_empty(nodes_with_empty_addr)
+        )
+    report_items += _report_unresolvable_addresses_if_any(
+        unresolvable_addresses, force_unresolvable
+    )
+
+    # Check mixing IPv4 and IPv6 in the link
+    if ADDR_IPV4 in addr_types and ADDR_IPV6 in addr_types:
+        report_items.append(reports.corosync_ip_version_mismatch_in_links())
+
+    # Check addresses are unique
+    report_items += _report_non_unique_addresses(
+        existing_addrs,
+        node_addr_map.values()
+    )
+
+    # Check link options
+    report_items += _add_link_options_knet(link_options)
+    if "linknumber" in link_options:
+        if link_options["linknumber"] in linknumbers_existing:
+            report_items.append(
+                reports.corosync_link_already_exists_cannot_add(
+                    link_options["linknumber"]
+                )
+            )
+
+    return report_items
+
+def remove_links(linknumbers_to_remove, linknumbers_existing, transport):
+    """
+    Validate removing links
+
+    iterable linknumbers_to_remove -- links to be removed (linknumbers strings)
+    iterable linknumbers_existing -- all existing linknumbers (strings)
+    string transport -- corosync transport used in the cluster
+    """
+    report_items = []
+
+    if transport not in constants.TRANSPORTS_KNET:
+        report_items.append(
+            reports.corosync_cannot_add_remove_links_bad_transport(
+                transport,
+                constants.TRANSPORTS_KNET,
+                add_or_not_remove=False,
+            )
+        )
+        return report_items
+
+    to_remove_duplicates = {
+        link
+        for link, count in Counter(linknumbers_to_remove).items()
+        if count > 1
+    }
+    if to_remove_duplicates:
+        report_items.append(
+            reports.corosync_link_number_duplication(to_remove_duplicates)
+        )
+
+    to_remove = frozenset(linknumbers_to_remove)
+    existing = frozenset(linknumbers_existing)
+    left = existing - to_remove
+    nonexistent = to_remove - existing
+
+    if not to_remove:
+        report_items.append(
+            reports.corosync_cannot_add_remove_links_no_links_specified(
+                add_or_not_remove=False,
+            )
+        )
+    if len(left) < constants.LINKS_KNET_MIN:
+        report_items.append(
+            reports.corosync_cannot_add_remove_links_too_many_few_links(
+                # only existing links can be removed, do not count nonexistent
+                # ones
+                len(to_remove & existing),
+                len(left),
+                constants.LINKS_KNET_MIN,
+                add_or_not_remove=False,
+            )
+        )
+    if nonexistent:
+        report_items.append(
+            reports.corosync_link_does_not_exist_cannot_remove(
+                nonexistent,
+                existing
+            )
+        )
+
+    return report_items
+
+def update_link(
+    linknumber, node_addr_map, link_options,
+    current_link_options, coro_existing_nodes, pcmk_existing_nodes,
+    linknumbers_existing, transport, ip_version,
+    force_unresolvable=False
+):
+    # pylint: disable=too-many-arguments
+    # pylint: disable=too-many-branches
+    # pylint: disable=too-many-locals
+    """
+    Validate changing an existing link
+
+    string linknumber -- the link to be changed
+    dict node_addr_map -- key: node name, value: node address for the new link
+    dict link_options -- link options
+    dict current_link_options -- current options of the link to be changed
+    list coro_existing_nodes -- existing corosync nodes; list of CorosyncNode
+    list pcmk_existing_nodes -- existing pacemaker nodes; list of PacemakerNode
+    iterable linknumbers_existing -- all currently existing links (linknumbers)
+    string transport -- corosync transport used in the cluster
+    string ip_version -- ip family defined to be used in the cluster
+    bool force_unresolvable -- if True, report unresolvable addresses as
+        warnings instead of errors
+    """
+    report_items = []
+    # check the link exists
+    if linknumber not in linknumbers_existing:
+        # All other validations work with what is set for the existing link. If
+        # the linknumber is wrong, there is no point in returning possibly
+        # misleading errors.
+        return [
+            reports.corosync_link_does_not_exist_cannot_update(
+                linknumber, existing_link_list=linknumbers_existing
+            )
+        ]
+    # validate link options based on transport
+    if link_options:
+        if transport in constants.TRANSPORTS_UDP:
+            report_items.extend(
+                _update_link_options_udp(link_options, current_link_options)
+            )
+        elif transport in constants.TRANSPORTS_KNET:
+            report_items.extend(
+                _update_link_options_knet(link_options, current_link_options)
+            )
+    # validate addresses
+    get_addr_type = _addr_type_analyzer()
+    existing_names = set()
+    unchanged_addrs = set()
+    link_addr_types = []
+    for node in coro_existing_nodes:
+        existing_names.add(node.name)
+        if node.name in node_addr_map:
+            link_addr_types.append(get_addr_type(node_addr_map[node.name]))
+            unchanged_addrs |= set(node.addrs_plain(except_link=linknumber))
+        else:
+            addr = node.addr_plain_for_link(linknumber)
+            if addr:
+                link_addr_types.append(get_addr_type(addr))
+            unchanged_addrs |= set(node.addrs_plain())
+    for node in pcmk_existing_nodes:
+        unchanged_addrs.add(node.addr)
+    # report unknown nodes
+    report_items += [
+        reports.node_not_found(node)
+        for node in sorted(set(node_addr_map.keys()) - existing_names)
+    ]
+    # validate new addresses
+    unresolvable_addresses = set()
+    nodes_with_empty_addr = set()
+    dummy_addr_types = []
+    for node_name, node_addr in node_addr_map.items():
+        if node_addr == "":
+            nodes_with_empty_addr.add(node_name)
+        else:
+            _validate_addr_type(
+                node_addr, linknumber, ip_version, get_addr_type,
+                # these will get appended in the function
+                dummy_addr_types, unresolvable_addresses, report_items
+            )
+    if nodes_with_empty_addr:
+        report_items.append(
+            reports.node_addresses_cannot_be_empty(nodes_with_empty_addr)
+        )
+    report_items += _report_unresolvable_addresses_if_any(
+        unresolvable_addresses, force_unresolvable
+    )
+    # Check mixing IPv4 and IPv6 in the link - get addresses after update
+    if ADDR_IPV4 in link_addr_types and ADDR_IPV6 in link_addr_types:
+        report_items.append(reports.corosync_ip_version_mismatch_in_links())
+    # Check address are unique. If new addresses are unique and no new address
+    # already exists in the set of addresses not changed by the update, then
+    # the new addresses are unique.
+    report_items += _report_non_unique_addresses(
+        unchanged_addrs,
+        node_addr_map.values()
+    )
+
+    return report_items
+
+def _report_non_unique_addresses(existing_addrs, new_addrs):
+    report_items = []
+
+    already_existing_addrs = existing_addrs.intersection(new_addrs)
+    if already_existing_addrs:
+        report_items.append(
+            reports.node_addresses_already_exist(already_existing_addrs)
+        )
+
+    non_unique_addrs = {
+        addr
+        for addr, count in Counter(new_addrs).items()
+        # empty strings are not valid addresses and they should be reported
+        # from a different piece of code in a different report
+        if count > 1 and addr != ""
+    }
+    if non_unique_addrs:
+        report_items.append(
+            reports.node_addresses_duplication(non_unique_addrs)
+        )
+
+    return report_items
+
+def create_transport_udp(generic_options, compression_options, crypto_options):
+    """
+    Validate creating udp/udpu transport options
+
+    dict generic_options -- generic transport options
+    dict compression_options -- compression options
+    dict crypto_options -- crypto options
+    """
+    # No need to support force:
+    # * values are either an enum or numbers with no range set - nothing to
+    #   force
+    # * names are strictly set as we cannot risk the user overwrites some
+    #   setting they should not to
+    # * changes to names and values in corosync are very rare
+    allowed_options = [
+        "ip_version",
+        "netmtu",
+    ]
+    validators = [
+        validate.NamesIn(allowed_options, option_type="udp/udpu transport"),
+        validate.ValueIn("ip_version", constants.IP_VERSION_VALUES),
+        validate.ValuePositiveInteger("netmtu"),
+    ] + _get_unsuitable_keys_and_values_validators(
+        generic_options, option_type="udp/udpu transport"
+    )
+    report_items = validate.ValidatorAll(validators).validate(generic_options)
+
+    if compression_options:
+        report_items.append(
+            reports.corosync_transport_unsupported_options(
+                "compression",
+                "udp/udpu",
+                ("knet", )
+            )
+        )
+    if crypto_options:
+        report_items.append(
+            reports.corosync_transport_unsupported_options(
+                "crypto",
+                "udp/udpu",
+                ("knet", )
+            )
+        )
+
+    return report_items
+
+def create_transport_knet(generic_options, compression_options, crypto_options):
+    """
+    Validate creating knet transport options
+
+    dict generic_options -- generic transport options
+    dict compression_options -- compression options
+    dict crypto_options -- crypto options
+    """
+    # No need to support force:
+    # * values are either an enum or numbers with no range set - nothing to
+    #   force
+    # * names are strictly set as we cannot risk the user overwrites some
+    #   setting they should not to
+    # * changes to names and values in corosync are very rare
+    generic_allowed = [
+        "ip_version", # It tells knet which IP to prefer.
+        "knet_pmtud_interval",
+        "link_mode",
+    ]
+    generic_validators = [
+        validate.NamesIn(generic_allowed, option_type="knet transport"),
+        validate.ValueIn("ip_version", constants.IP_VERSION_VALUES),
+        validate.ValueNonnegativeInteger("knet_pmtud_interval"),
+        validate.ValueIn("link_mode", ("active", "passive", "rr")),
+    ] + _get_unsuitable_keys_and_values_validators(
+        generic_options, option_type="knet transport"
+    )
+
+    compression_allowed = [
+        "level",
+        "model",
+        "threshold",
+    ]
+    compression_validators = [
+        validate.NamesIn(compression_allowed, option_type="compression"),
+        validate.ValueNonnegativeInteger("level"),
+        validate.ValueNotEmpty(
+            "model",
+            "a compression model e.g. zlib, lz4 or bzip2"
+        ),
+        validate.ValueNonnegativeInteger("threshold"),
+    ] + _get_unsuitable_keys_and_values_validators(
+        compression_options, option_type="compression"
+    )
+
+    crypto_allowed = [
+        "cipher",
+        "hash",
+        "model",
+    ]
+    crypto_validators = [
+        validate.NamesIn(crypto_allowed, option_type="crypto"),
+        validate.ValueIn(
+            "cipher",
+            ("none", "aes256", "aes192", "aes128")
+        ),
+        validate.ValueIn(
+            "hash",
+            ("none", "md5", "sha1", "sha256", "sha384", "sha512")
+        ),
+        validate.ValueIn("model", ("nss", "openssl")),
+    ] + _get_unsuitable_keys_and_values_validators(
+        crypto_options, option_type="crypto"
+    )
+
+    report_items = (
+        validate.ValidatorAll(generic_validators).validate(generic_options)
+        +
+        validate.ValidatorAll(compression_validators)
+            .validate(compression_options)
+        +
+        validate.ValidatorAll(crypto_validators).validate(crypto_options)
+    )
+
+    if (
+        # default values taken from `man corosync.conf`
+        crypto_options.get("cipher", "none") != "none"
+        and
+        crypto_options.get("hash", "none") == "none"
+    ):
+        report_items.append(
+            reports.prerequisite_option_must_be_enabled_as_well(
+                "cipher",
+                "hash",
+                option_type="crypto",
+                prerequisite_type="crypto"
+            )
+        )
+
+    return report_items
+
+def create_totem(options):
+    """
+    Validate creating the "totem" section
+
+    dict options -- totem options
+    """
+    # No need to support force:
+    # * values are either bool or numbers with no range set - nothing to force
+    # * names are strictly set as we cannot risk the user overwrites some
+    #   setting they should not to
+    # * changes to names and values in corosync are very rare
+    allowed_options = [
+        "consensus",
+        "downcheck",
+        "fail_recv_const",
+        "heartbeat_failures_allowed",
+        "hold",
+        "join",
+        "max_messages",
+        "max_network_delay",
+        "merge",
+        "miss_count_const",
+        "send_join",
+        "seqno_unchanged_const",
+        "token",
+        "token_coefficient",
+        "token_retransmit",
+        "token_retransmits_before_loss_const",
+        "window_size",
+    ]
+    validators = [
+        validate.NamesIn(allowed_options, option_type="totem"),
+        validate.ValueNonnegativeInteger("consensus"),
+        validate.ValueNonnegativeInteger("downcheck"),
+        validate.ValueNonnegativeInteger("fail_recv_const"),
+        validate.ValueNonnegativeInteger("heartbeat_failures_allowed"),
+        validate.ValueNonnegativeInteger("hold"),
+        validate.ValueNonnegativeInteger("join"),
+        validate.ValueNonnegativeInteger("max_messages"),
+        validate.ValueNonnegativeInteger("max_network_delay"),
+        validate.ValueNonnegativeInteger("merge"),
+        validate.ValueNonnegativeInteger("miss_count_const"),
+        validate.ValueNonnegativeInteger("send_join"),
+        validate.ValueNonnegativeInteger("seqno_unchanged_const"),
+        validate.ValueNonnegativeInteger("token"),
+        validate.ValueNonnegativeInteger("token_coefficient"),
+        validate.ValueNonnegativeInteger("token_retransmit"),
+        validate.ValueNonnegativeInteger("token_retransmits_before_loss_const"),
+        validate.ValueNonnegativeInteger("window_size"),
+    ] + _get_unsuitable_keys_and_values_validators(options, option_type="totem")
+    return validate.ValidatorAll(validators).validate(options)
+
+def create_quorum_options(options, has_qdevice):
+    """
+    Validate creating quorum options
+
+    dict options -- quorum options to set
+    bool has_qdevice -- is a qdevice set in corosync.conf?
+    """
+    # No need to support force:
+    # * values are either bool or numbers with no range set - nothing to force
+    # * names are strictly set as we cannot risk the user overwrites some
+    #   setting they should not to
+    # * changes to names and values in corosync are very rare
+    report_items = _validate_quorum_options(
+        options, has_qdevice, allow_empty_values=False
+    )
+    if (
+        # Default value in corosync is 10 ms. However, that would always fail
+        # the validation, so we use the default value of 0.
+        options.get("last_man_standing_window", "0") != "0"
+        and
+        # default value taken from `man corosync.conf`
+        options.get("last_man_standing", "0") == "0"
+    ):
+        report_items.append(
+            reports.prerequisite_option_must_be_enabled_as_well(
+                "last_man_standing_window",
+                "last_man_standing",
+                option_type="quorum",
+                prerequisite_type="quorum"
+            )
+        )
+    return report_items
+
+def update_quorum_options(options, has_qdevice, current_options):
+    """
+    Validate modifying quorum options
+
+    dict options -- quorum options to set
+    bool has_qdevice -- is a qdevice set in corosync.conf?
+    dict current_options -- currently set quorum options
+    """
+    # No need to support force:
+    # * values are either bool or numbers with no range set - nothing to force
+    # * names are strictly set as we cannot risk the user overwrites some
+    #   setting they should not to
+    # * changes to names and values in corosync are very rare
+    report_items = _validate_quorum_options(
+        options, has_qdevice, allow_empty_values=True
+    )
+    effective_lms = options.get(
+        "last_man_standing",
+        # default value taken from `man corosync.conf`
+        current_options.get("last_man_standing", "0")
+    )
+    if (
+        # Default value in corosync is 10 ms. However, that would always fail
+        # the validation, so we use the default value of 0.
+        options.get("last_man_standing_window", "0") != "0"
+        and
+        effective_lms == "0"
+    ):
+        report_items.append(
+            reports.prerequisite_option_must_be_enabled_as_well(
+                "last_man_standing_window",
+                "last_man_standing",
+                option_type="quorum",
+                prerequisite_type="quorum"
+            )
+        )
+    return report_items
+
+def _validate_quorum_options(options, has_qdevice, allow_empty_values):
+    report_items = validate.ValidatorAll(
+        _get_quorum_options_validators(
+            options, allow_empty_values=allow_empty_values
+        )
+    ).validate(options)
+
+    if has_qdevice:
+        qdevice_incompatible_options = [
+            name for name in options
+            if name in constants.QUORUM_OPTIONS_INCOMPATIBLE_WITH_QDEVICE
+        ]
+        if qdevice_incompatible_options:
+            report_items.append(
+                reports.corosync_options_incompatible_with_qdevice(
+                    qdevice_incompatible_options
+                )
+            )
+
+    return report_items
+
+def _get_quorum_options_validators(options, allow_empty_values=False):
+    allowed_bool = ("0", "1")
+    validators = [
+        validate.ValueIn("auto_tie_breaker", allowed_bool),
+        validate.ValueIn("last_man_standing", allowed_bool),
+        validate.ValuePositiveInteger("last_man_standing_window"),
+        validate.ValueIn("wait_for_all", allowed_bool),
+    ]
+    if allow_empty_values:
+        for val in validators:
+            val.empty_string_valid = True
+    return (
+        [
+            validate.NamesIn(constants.QUORUM_OPTIONS, option_type="quorum")
+        ]
+        +
+        _get_unsuitable_keys_and_values_validators(
+            options, option_type="quorum"
+        )
+        +
+        validators
+    )
+
+def add_quorum_device(
+    model, model_options, generic_options, heuristics_options, node_ids,
+    force_model=False, force_options=False
+):
+    """
+    Validate adding a quorum device
+
+    string model -- quorum device model
+    dict model_options -- model specific options
+    dict generic_options -- generic quorum device options
+    dict heuristics_options -- heuristics options
+    list node_ids -- list of existing node ids
+    bool force_model -- continue even if the model is not valid
+    bool force_options -- turn forceable errors into warnings
+    """
+    model_validators = {
+        "net": lambda: _qdevice_add_model_net_options(
+            model_options,
+            node_ids,
+            force_options=force_options,
+        ),
+    }
+    if model in model_validators:
+        model_report_items = model_validators[model]()
+    else:
+        model_report_items = validate.ValidatorAll([
+            validate.ValueIn(
+                "model",
+                list(model_validators.keys()),
+                **validate.set_warning(
+                    report_codes.FORCE_QDEVICE_MODEL, force_model
+                )
+            ),
+            validate.ValueCorosyncValue("model"),
+        ]).validate({"model": model})
+
+    return (
+        model_report_items
+        +
+        validate.ValidatorAll(
+            _get_unsuitable_keys_and_values_validators(
+                model_options, "quorum device model"
+            )
+        ).validate(model_options)
+        +
+        validate.ValidatorAll(
+            _get_qdevice_generic_options_validators(
+                generic_options,
+                force_options=force_options
+            )
+        ).validate(generic_options)
+        +
+        _qdevice_add_heuristics_options(heuristics_options, force_options)
+    )
+
+def update_quorum_device(
+    model, model_options, generic_options, heuristics_options, node_ids,
+    force_options=False
+):
+    """
+    Validate updating a quorum device
+
+    string model -- quorum device model
+    dict model_options -- model specific options
+    dict generic_options -- generic quorum device options
+    dict heuristics_options -- heuristics options
+    list node_ids -- list of existing node ids
+    bool force_options -- turn forceable errors into warnings
+    """
+    model_validators = {
+        "net": lambda: _qdevice_update_model_net_options(
+            model_options,
+            node_ids,
+            force_options
+        ),
+    }
+    if model in model_validators:
+        model_report_items = model_validators[model]()
+    else:
+        model_report_items = []
+
+    return (
+        model_report_items
+        +
+        validate.ValidatorAll(
+            _get_unsuitable_keys_and_values_validators(
+                model_options, "quorum device model"
+            )
+        ).validate(model_options)
+        +
+        validate.ValidatorAll(
+            _get_qdevice_generic_options_validators(
+                generic_options,
+                allow_empty_values=True,
+                force_options=force_options
+            )
+        ).validate(generic_options)
+        +
+        _qdevice_update_heuristics_options(heuristics_options, force_options)
+    )
+
+def _qdevice_add_heuristics_options(options, force_options=False):
+    """
+    Validate quorum device heuristics options when adding a quorum device
+
+    dict options -- heuristics options
+    bool force_options -- turn forceable errors into warnings
+    """
+    options_nonexec, options_exec = _split_heuristics_exec_options(options)
+    validators_nonexec = _get_qdevice_heuristics_nonexec_options_validators(
+        force_options=force_options
+    )
+    validators_exec = [
+        validate.ValueNotEmpty(option, "a command to be run")
+        for option in options_exec
+    ]
+    return (
+        validate.ValidatorAll(
+            _get_unsuitable_keys_and_values_validators(options, "heuristics")
+        ).validate(options)
+        +
+        validate.ValidatorAll(validators_nonexec).validate(options_nonexec)
+        +
+        validate.ValidatorAll(validators_exec).validate(options_exec)
+    )
+
+def _qdevice_update_heuristics_options(options, force_options=False):
+    """
+    Validate quorum device heuristics options when updating a quorum device
+
+    dict options -- heuristics options
+    bool force_options -- turn forceable errors into warnings
+    """
+    options_nonexec, dummy_options_exec = _split_heuristics_exec_options(
+        options
+    )
+    validators_nonexec = _get_qdevice_heuristics_nonexec_options_validators(
+        allow_empty_values=True,
+        force_options=force_options
+    )
+    # No validation necessary for values of exec options - they are either
+    # empty (meaning they will be removed) or nonempty strings.
+    return (
+        validate.ValidatorAll(
+            _get_unsuitable_keys_and_values_validators(options, "heuristics")
+        ).validate(options)
+        +
+        validate.ValidatorAll(validators_nonexec).validate(options_nonexec)
+    )
+
+def _qdevice_add_model_net_options(options, node_ids, force_options=False):
+    """
+    Validate quorum device model options when adding a quorum device
+
+    dict options -- model options
+    list node_ids -- list of existing node ids
+    bool force_options -- turn forceable errors into warnings
+    """
+    return validate.ValidatorAll(
+        [
+            validate.IsRequiredAll(
+                _QDEVICE_NET_REQUIRED_OPTIONS, option_type="quorum device model"
+            )
+        ]
+        +
+        _get_qdevice_model_net_options_validators(
+            node_ids,
+            force_options=force_options
+        )
+    ).validate(options)
+
+def _qdevice_update_model_net_options(options, node_ids, force_options=False):
+    """
+    Validate quorum device model options when updating a quorum device
+
+    dict options -- model options
+    list node_ids -- list of existing node ids
+    bool force_options -- turn forceable errors into warnings
+    """
+    return validate.ValidatorAll(
+        _get_qdevice_model_net_options_validators(
+            node_ids,
+            allow_empty_values=True,
+            force_options=force_options
+        )
+    ).validate(options)
+
+def _get_qdevice_generic_options_validators(
+    options, allow_empty_values=False, force_options=False
+):
+    kwargs = validate.set_warning(report_codes.FORCE_OPTIONS, force_options)
+
+    validators = [
+        validate.ValuePositiveInteger("sync_timeout", **kwargs),
+        validate.ValuePositiveInteger("timeout", **kwargs),
+    ]
+    if allow_empty_values:
+        for val in validators:
+            val.empty_string_valid = True
+
+    return (
+        [
+            validate.NamesIn(
+                ["sync_timeout", "timeout"],
+                option_type="quorum device",
+                banned_name_list=["model"],
+                **kwargs
+            )
+        ]
+        +
+        _get_unsuitable_keys_and_values_validators(options, "quorum device")
+        +
+        validators
+    )
+
+def _split_heuristics_exec_options(options):
+    options_exec = dict()
+    options_nonexec = dict()
+    for name, value in options.items():
+        if name.startswith("exec_"):
+            options_exec[name] = value
+        else:
+            options_nonexec[name] = value
+    return options_nonexec, options_exec
+
+def _get_qdevice_heuristics_nonexec_options_validators(
+    allow_empty_values=False, force_options=False
+):
+    kwargs = validate.set_warning(report_codes.FORCE_OPTIONS, force_options)
+
+    allowed_options = [
+        "interval",
+        "mode",
+        "sync_timeout",
+        "timeout",
+    ]
+    validators = [
+        validate.ValueIn("mode", ("off", "on", "sync"), **kwargs),
+        validate.ValuePositiveInteger("interval", **kwargs),
+        validate.ValuePositiveInteger("sync_timeout", **kwargs),
+        validate.ValuePositiveInteger("timeout", **kwargs),
+    ]
+
+    if allow_empty_values:
+        for val in validators:
+            val.empty_string_valid = True
+    return [
+        validate.NamesIn(
+            allowed_options,
+            allowed_option_patterns=["exec_NAME"],
+            option_type="heuristics",
+            **kwargs
+        )
+    ] + validators
+
+def _get_qdevice_model_net_options_validators(
+    node_ids, allow_empty_values=False, force_options=False
+):
+    kwargs = validate.set_warning(report_codes.FORCE_OPTIONS, force_options)
+    allowed_algorithms = ("ffsplit", "lms")
+
+    validators_required_options = [
+        validate.ValidatorFirstError([
+            validate.ValueNotEmpty("algorithm", allowed_algorithms),
+            validate.ValueIn("algorithm", allowed_algorithms, **kwargs),
+        ]),
+        validate.ValueNotEmpty("host", "a qdevice host address"),
+    ]
+    validators_optional_options = [
+        validate.ValueIntegerInRange(
+            "connect_timeout",
+            1000,
+            2*60*1000,
+            **kwargs
+        ),
+        validate.ValueIn("force_ip_version", ("0", "4", "6"), **kwargs),
+        validate.ValuePortNumber("port", **kwargs),
+        validate.ValueIn(
+            "tie_breaker",
+            ["lowest", "highest"] + node_ids,
+            **kwargs
+        ),
+    ]
+
+    if allow_empty_values:
+        for val in validators_optional_options:
+            val.empty_string_valid = True
+    return [
+        validate.NamesIn(
+            _QDEVICE_NET_REQUIRED_OPTIONS + _QDEVICE_NET_OPTIONAL_OPTIONS,
+            option_type="quorum device model",
+            **kwargs
+        )
+    ] + validators_required_options + validators_optional_options
+
+def _get_option_after_update(
+    new_options, current_options, option_name, default_value
+):
+    if option_name in new_options:
+        if new_options[option_name] == "":
+            return default_value
+        return new_options[option_name]
+    return current_options.get(option_name, default_value)
+
+def _get_unsuitable_keys_and_values_validators(option_dict, option_type=None):
+    return (
+        [validate.CorosyncOption(option_type=option_type)]
+        +
+        [validate.ValueCorosyncValue(name) for name in option_dict]
+    )

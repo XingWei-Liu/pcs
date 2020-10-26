@@ -1,0 +1,5 @@
+<% if @myView == "resource" %>
+  {{resource-tree-view elements=Pcs.resourcesContainer.resource_list}}
+<% else %>
+  {{resource-tree-view elements=Pcs.resourcesContainer.fence_list}}
+<% end %>
