@@ -1,0 +1,781 @@
+From 9c37d5c13b7c7c6113627e3091c0fe8602e4943a Mon Sep 17 00:00:00 2001
+From: liuxingwei <liuxingwei@chengjieos.com>
+Date: Mon, 26 Oct 2020 18:31:15 +0800
+Subject: [PATCH] ruby+js
+
+---
+ pcsd/i18n/en.yml                |  37 ++++
+ pcsd/i18n/zh.yml                | 116 ++++++----
+ pcsd/public/js/cluster-setup.js |  10 +-
+ pcsd/public/js/jquery-i18n.js   |  11 +-
+ pcsd/views/manage.erb           | 375 +++-----------------------------
+ 5 files changed, 164 insertions(+), 385 deletions(-)
+
+diff --git a/pcsd/i18n/en.yml b/pcsd/i18n/en.yml
+index 31062f1..6c382a7 100644
+--- a/pcsd/i18n/en.yml
++++ b/pcsd/i18n/en.yml
+@@ -259,3 +259,40 @@ post:
+   Unabled_to_save_settings: Unable to save settings on local cluster node(s) %1. Make sure pcsd is running on the nodes and the nodes are authorized.
+   Errors: Errors
+   Totem_consensus: This timeout specifies in milliseconds how long to wait for consensus to be achieved before starting a new round of membership configuration. The minimum value for consensus must be 1.2 * token. This value will be automatically calculated at 1.2 * token if the user doesn't specify a consensus value.<br/><br/>For two node clusters, a consensus larger than the join timeout but less than token is safe. For three node or larger clusters, consensus should be larger than token. There is an increasing risk of odd membership changes, which still guarantee virtual synchrony, as node count grows if consensus is less than token.<br/><br/>The default is 1200 milliseconds.
++  Knet_link_priority: Specifies the priority for the link when knet is used in 'passive' mode.
++  Knet_ping_interval: Specifies the interval between knet link pings.Ping Interval and Ping Timeout are a pair, if one is specified the other should be too, otherwise one will be calculated from the token timeout and one will be taken from the config file.<br/><br/>Default:Token Timeout / (Pong Count * 2)
++  Knet_ping_precision: How many values of latency are used to calculate the average link latency.<br/><br/>Default:2048 samples 
++  Knet_ping_timeout: If no ping is received within this time, the knet link is declared dead.Ping Interval and Ping Timeout are a pair, if one is specified the other should be too, otherwise one will be calculated from the token timeout and one will be taken from the config file.
++  Knet_pong_count: How many valid ping/pongs before a link is marked UP.<br/><br/>Default:5
++  Knet_transport: Which IP transport knet should use.<br/><br/>Default:udp
++  Knet_mcastport: Port number to be used for communication. The default remains the old one of 5405 + linknumber, but you can override it per link here.
++  Knet_compression_model: The (optional) type of compression used by knet. The values available depend on the build and also available libraries. Typically zlib and lz4 will be available but bzip2 and others could also be allowed.<br/><br/>Default:none
++  Knet_compression_threshold: Tells knet to NOT compress any packets that are smaller than the value indicated. Set to 0 to reset to the default. Set to 1 to compress everything.<br/><br/>Default:100 bytes
++  Knet_compression_level: Many compression libraries allow tuning of compression parameters.For example 0 or 1 ... 9 are commonly used to determine the level of compression. This value is passed unmodified to the compression library so it is recommended to consult the library's documentation for more detailed information.
++  Knet_crypto_model: This specifies which cryptographic library should be used by knet.<br/><br/>Default:nss
++  Knet_crypto_hash: This specifies which HMAC authentication should be used to authenticate all messages.<br/><br/>Default:sha256
++  Knet_crypto_cipher: This specifies which cipher should be used to encrypt all messages. Enabling Cipher requires also enabling of Hash.<br/><br/>Default:aes256
++  Knet_pmtud_interval: How often the knet PMTUd runs to look for network MTU changes.Value inseconds.<br/><br/>Default:60s
++  Knet_link_mode: This specifies the knet mode.<br/><br/>passive:The active link with the lowest priority will be used.If one or more links share the same priority the one with the lowest link ID will be used.<br/><br/>active:All active links will be used simultaneously to send traffic, link priority is ignored.<br/><br/>round-robin:Each packet will be sent to the next active link in order.<br/><br/>If only one interface directive is specified, passive is automatically chosen.
++  quorum_auto_tie_breaker: "Enables Auto Tie Breaker (ATB) feature (default: off).<br/><br/>The general behaviour of votequorum allows a simultaneous node failure up to 50%-1 node, assuming each node has 1 vote.<br/><br/>When ATB is enabled, the cluster can suffer up to 50% of the nodes failing at the same time, in a deterministic fashion.The cluster partition,or the set of nodes that are still in contact with the node that has the lowest nodeid will remain quorate. The other nodes will be inquorate."
++  quorum_last_man_standing: "Enables Last Man Standing (LMS) feature (default: off). <br/><br/>The general behaviour of votequorum is to set Expected Votes and Quorum at startup and use those values during the whole lifetime of the cluster.<br/><br/>Using for example an 8 node cluster where each node has 1 vote, Expected Votes is set to 8 and Quorum to 5. This condition allows a total failure of 3 nodes. If a 4th node fails, the cluster becomes inquorate and it will stop providing services.<br/><br/>Enabling LMS allows the cluster to dynamically recalculate Expected Votes and Quorum under specific circumstances. It is essential to enable WFA when using LMS in High Availability clusters.<br/><br/>Using the above 8 node cluster example, with LMS enabled the cluster can retain quorum and continue operating by losing, in a cascade fashion, up to 6 nodeswith only 2 remaining active."
++  quorum_last_man_standing_window: "Tunes Last Man Standing Window (default: 10000 ms)<br/><br/>The window of time between when a node (or group of nodes die) and quorum is recalculated if the Last Man Standing option is enabled."
++  quorum_wait_for_all: "Enables Wait For All (WFA) feature (default: off).<br/><br/>The general behaviour of votequorum is to switch a cluster from inquorate to quorate as soon as possible. For example, in an 8 node cluster, where every node has 1 vote, Expected Votes is set to 8 and Quorum is (50% + 1) 5. As soon as 5 (or more) nodes are visible to each other, the partition of 5 (or more) becomes quorate and can start operating.<br/><br/>When WFA is enabled, the cluster will be quorate for the first time only after all nodes have been visible at least once at the same time.
++<br/><br/>This feature has the advantage of avoiding some startup race conditions, with the cost that all nodes need to be up at the same time at least once before the cluster can operate.<br/><br/>A common startup race condition based on the above example is that as soon as 5 nodes become quorate, with the other 3 still offline, the remaining 3 nodes will be fenced.
++<br/><br/>It is very useful when combined with Last Man Standing."
++  totem_downcheck: "This timeout specifies in milliseconds how long to wait before checking that a network interface is back up after it has been downed.<br/><br/>The default is 1000 milliseconds."
++  totem_fail_recv_const: "This constant specifies how many rotations of the token without receiving any of the messages when messages should be received may occur before a new configuration is formed.<br/><br/>The default is 2500 failures to receive a message."
++  totem_heartbeat_failures_allowed: "[HeartBeating  mechanism] Configures the optional HeartBeating mechanism for faster failure detection. Keep in mind that engaging this mechanism in lossy networks could cause faulty loss declaration as the mechanism relies on the network for heartbeating.<br/><br/>So as a rule of thumb use this mechanism if you require improved failure in low to medium utilized networks.<br/><br/>This constant specifies the number of heartbeat failures the system should tolerate before declaring heartbeat failure e.g 3. Also if this value is not set or is 0 then the heartbeat mechanism is not engaged in the system and token rotation is the method of failure detection.<br/><br/>The default is 0 (disabled)."
++  totem_hold: "This timeout specifies in milliseconds how long the token should be held by there presentative when  the  protocol  is under low utilization. It is not recommended to alter this value without guidance from the corosync community.<br/><br/>The default is 180 milliseconds."
++  totem_join: "This timeout specifies in milliseconds how long to wait for join messages in the membership protocol.<br/><br/>The default is 50 milliseconds."
++  totem_max_messages: "This constant specifies the maximum number of messages that may be sent by one processor on receipt of the token. The max_messages parameter is limited to 256000 / netmtu to prevent overflow of the kernel transmit buffers.<br/><br/>The default is 17 messages."
++  totem_max_network_delay: "[HeartBeating mechanism] This constant specifies in milliseconds the approximate delay that your network takes to transport one packet from one machine to another. This value is to be set by system engineers and please don't change if not sure as this effects the failure detection mechanism using heartbeat.<br/><br/>The default is 50 milliseconds"
++  totem_merge : "This timeout specifies in milliseconds how long to wait before checking for a partition when no multicast traffic is being sent. If multicast traffic is being sent, the merge detection happens automatically as a function of the protocol.<br/><br/>The default is 200 milliseconds."
++  totem_miss_count_const: "This constant defines the maximum number of times on receipt of a token a message is checked for retransmission before a retransmission occurs. This parameter is useful to modify for switches that delay multicast packets compared to unicast packets. The default setting works well for nearly all modern switches.<br/><br/>The default is 5 messages."
++  totem_send_join: "This timeout specifies in milliseconds an upper range between 0 and send_join to wait before sending a join message. For configurations with less than 32 nodes, this parameter is not necessary. For larger rings, this parameter is necessary to ensure the NIC is not overflowed with join messages on formation of a new ring. A reasonable value for large rings (128 nodes) would be 80msec. Other timer values must also change if this value is changed. Seek advice from the corosync mailing list if trying to run larger configurations.<br/><br/>The default is 0 milliseconds."
++  totem_seqno_unchanged_const: "This constant specifies how many rotations of the token without any multicast traffic should occur before the hold timer is started.<br/><br/>The default is 30 rotations."
++  totem_token: "This timeout is used directly or as a base for real token timeout calculation (explained in token_coefficient section). Token timeout specifies in milliseconds until a token loss is declared after not receiving a token. This is the time spent detecting a failure of a processor in the current configuration. Reforming a new configuration takes about 50 milliseconds in addition to this timeout.<br/><br/>For real token timeout used by totem it's possible to read cmap value of runtime.config.token key.<br/><br/>The default is 1000 milliseconds."
++  totem_token_coefficient: "This value is used only when nodelist section is specified and contains at least 3 nodes.If so, real token timeout is then computed as token + (number_of_nodes- 2) *token_coefficient.This allows cluster to scale without manually changing token timeout every time new node is added.This value can be set to 0 resulting in effective removal of this feature.<br/><br/>The default is 650 milliseconds."
++  totem_token_retransmit: "This timeout specifies in milliseconds after how long before receiving a token the token is retransmitted. This will be automatically calculated if token is modified. It is not recommended to alter this value without guidance from the corosync community.<br/><br/>The default is 238 milliseconds"
++  totem_token_retransmits_before_loss_const: "This value identifies how many token retransmits should be attempted before forming a new configuration. If this value is set, retransmit and hold will be automatically calculated from retransmits_before_loss and token.<br/><br/>The default is 4 retransmissions."
++  totem_window_size: "This constant specifies the maximum number of messages that may be sent on one token rotation. If all processors perform equally well, this value could be large (300), which would introduce higher latency from origination to delivery for very large rings. To reduce latency in large rings(16+), the defaults are a safe compromise. If 1 or more slow processor(s) are present among fast processors, window_size should be no larger than 256000 / netmtu to avoid overflow of the kernel receive buffers. The user is notified of this by the display of a retransmit list in the notification logs. There is no loss of data,but performance is reduced when these errors occur.<br/><br/>The default is 50 messages."
+diff --git a/pcsd/i18n/zh.yml b/pcsd/i18n/zh.yml
+index c8faf2a..9904c4b 100644
+--- a/pcsd/i18n/zh.yml
++++ b/pcsd/i18n/zh.yml
+@@ -1,11 +1,11 @@
+ post:
+   Username: 用户名
+   Password: 密码
+-  Login: 登陆
++  Login: 登录
+   NODES: 节点
+   RESOURCES: 资源
+   PERMISSIONS: 权限
+-  FENCE_DEVICES: 围栏设备
++  FENCE_DEVICES: 防护设备
+   ACLS: 访问控制
+   CLUSTER_PROPERTIES: 集群属性
+   MANAGE_CLUSTERS: 集群管理
+@@ -26,9 +26,9 @@ post:
+   Resources: 资源
+   RESOURCE: 资源名
+   No_resources: 未添加资源
+-  Fence_devices: 围栏设备
+-  Fence_device: 围栏设备名
+-  No_fence_devices: 无围栏设备
++  Fence_devices: 防护设备
++  Fence_device: 防护设备名
++  No_fence_devices: 无防护设备
+   Add: 添加
+   Edit_Node: 编辑节点
+   Pacemaker_Maintanence: Pacemaker 保留 
+@@ -44,7 +44,7 @@ post:
+   Standby: 待用
+   Unmaintenance: 解除保留
+   Maintenance: 保留
+-  Configure_Fencing: 配置围栏
++  Configure_Fencing: 配置防护
+   Manage: 管理
+   Select_Cluster: 选择集群
+   Clusters: 集群
+@@ -56,7 +56,7 @@ post:
+   Attribute: 属性
+   Value: 值
+   Remove: 移除
+-  Fence_Levels: 围栏级别
++  Fence_Levels: 防护级别
+   Level: 等级
+   Score: 评分
+   Node_ID: 节点号
+@@ -65,10 +65,10 @@ post:
+   Node: 节点
+   Create_Group: 创建组
+   Resource: 资源
+-  Fence_Device: 围栏设备
++  Fence_Device: 防护设备
+   Edit: 编辑
+   NO_RESOURCES_IN_CLUSTER: 集群中没有资源
+-  NO_FENCE_DEVICE_IN_CLUSTER: 集群中没有围栏设备
++  NO_FENCE_DEVICE_IN_CLUSTER: 集群中没有防护设备
+   TYPE: 类型
+   CLUSTER_PROPERTIES: 集群属性
+   Hide_advanced_settings: 隐藏高级设置
+@@ -76,10 +76,10 @@ post:
+   Apply_Changes: 应用更改
+   Refresh: 刷新
+   No_cluster_properties_available: 集群设置不可用
+-  Edit_ACL_Role: 编辑ACL规则
+-  ROLE: 规则
+-  Role_Name: 规则名
+-  Role_Description: 规则描述
++  Edit_ACL_Role: 编辑ACL用户
++  ROLE: 用户
++  Role_Name: 用户名
++  Role_Description: 用户描述
+   Permissions: 权限
+   Type: 类型
+   Read: 读权限
+@@ -98,7 +98,7 @@ post:
+   Clone: 克隆
+   Unclone: 取消克隆
+   Node_Rule: 节点/规则
+-  Resource_Ordering_Preferences: 资源排序偏好
++  Resource_Ordering_Preferences: 资源排序首选项
+   Action: 动作
+   Before_After: 行动前/行动后
+   NONE: 空
+@@ -109,7 +109,7 @@ post:
+   after: 行动前
+   before: 行动后
+   Resource_Ordering_Set_Preferences: 资源排序设置首选项
+-  Preference_Name_Set_of_Resources: 偏好名/资源设置
++  Preference_Name_Set_of_Resources: 首选项名称/资源设置
+   New_Set: 新设置
+   Set: 设置
+   Resource_Colocation_Preferences: 资源主机托管首选项
+@@ -155,7 +155,7 @@ post:
+   Please_specify_the_count_of_links_that_is_compatible_with_this_cluster: 请指定与此集群兼容的链接数
+   Start_the_Node: 启用节点
+   Node_Addresses: 节点地址
+-  Fence_Instance_Name: 隔离实例名称
++  Fence_Instance_Name: 实例名称
+   Bad_username_or_password: 无效的用户名或密码
+   displaying: 显示
+   all: 全部
+@@ -166,7 +166,7 @@ post:
+   issues: 问题
+   unknown: 未知
+   CLUSTER: 集群
+-  Add_Fence_Device: 添加隔离设备
++  Add_Fence_Device: 添加防护设备
+   login_expired: 您的登录已经失效，请重新登录
+   authenticate_required: 请输入管理用户密码对节点授权
+   Authentication_failed: 授权节点失败
+@@ -174,7 +174,7 @@ post:
+   Dialogue_custom_Node_Note: 对于每个节点，您可以指定一个地址和端口，pcsd将通过这些地址和端口与该节点进行通信。如果没有指定地址，将使用节点的名称。如果没有指定端口，将使用2224。
+   Change_order_of_resources: 改变资源排序
+   Group_Name: 组名
+-  Create_Fence_Instance: 创建隔离实例
++  Create_Fence_Instance: 创建防护实例
+   Dialogue_remove_cluster: 您确定要从GUI中删除以下集群吗?(这只会从GUI中删除集群，不会停止集群的运行。)
+   Dialogue_destroy_cluster: 您确定要销毁以下集群吗?
+   Link: 链接
+@@ -198,7 +198,7 @@ post:
+   Link_Priority: 链接优先级
+   Ping_Precision: 网络探测精度
+   Pong_Count: 网络探测计数
+-  Transport_options: 传输操作
++  Transport_options: 传输选项
+   IP_Version: ip 版本
+   PMTUd_Interval: 最大传输单元间隔
+   Link_Mode: 链接模式
+@@ -214,33 +214,33 @@ post:
+   IPv6_if_available_IPv4_otherwise: 优先IPv6
+   passive: 被动
+   active: 主动
+-  round_robin: 负载均衡 
++  round_robin: 轮询调度 
+   Auto_Tie_Breaker: 断路器
+-  Last_Man_Standing: 最后存活节点
+-  Last_Man_Standing_Window: 最后存活节点时间窗口
+-  Wait_for_All: 等待所有节点
++  Last_Man_Standing: LMS
++  Last_Man_Standing_Window: LMS窗口时间
++  Wait_for_All: WFA
+   turn_on: 开
+   turn_off: 关
+-  Consensus_Timeout: 同步超时时间
+-  Downcheck_Timeout: 下行超时检查
++  Consensus_Timeout: 同步时间
++  Downcheck_Timeout: 备份检查时间
+   Fail_Receive_Constant: 失败接收常量
+   Heartbeat_Failures_Allowed: 允许心跳检测失败
+-  Hold_Timeout: 保持超时
+-  Join_Timeout: 加入超时
+-  Max_Messages: 信息上限
++  Hold_Timeout: 令牌保留时间
++  Join_Timeout: 加入消息时间
++  Max_Messages: 消息上限
+   Max_Network_Delay: 最大网络延迟
+-  Merge_Timeout: 合并超时
+-  Miss_Count_Constant: 遗漏计数
+-  Send_Join_Timeout: 发送加入超时
++  Merge_Timeout: 合并时间
++  Miss_Count_Constant: 最大重传次数
++  Send_Join_Timeout: 等待发送加入消息时间
+   Seqno_Unchanged_Constant: 序号不变常数
+-  Token_Timeout: 令牌超时
++  Token_Timeout: 接收令牌时间
+   Token_Coefficient: 令牌系数
+-  Token_Retransmit_Timeout: 令牌重传超时
+-  Token_Retransmits_Before_Loss_Constant: 令牌在丢失数据之前重新传输
+-  Window_Size: 时间窗口
++  Token_Retransmit_Timeout: 令牌重传时间
++  Token_Retransmits_Before_Loss_Constant: 新配置重传令牌次数
++  Window_Size: 时间窗口大小
+   Are_you_sure_you_want_to_remove_the_following_nodes: 你确定要移除下列节点吗
+   Are_you_sure_you_want_to_remove_the_following_resources: 你确定要移除下列资源吗
+-  Are_you_sure_you_want_to_remove_the_following_ACL_roles: 你确定要移除下列ACL角色吗
++  Are_you_sure_you_want_to_remove_the_following_ACL_roles: 你确定要移除下列ACL用户吗
+   Enforce_removal: 强制删除
+   Specify_watchdog_devices_for_nodes: 指定节点的看门狗设备
+   SBD_options: SBD 选项
+@@ -252,10 +252,46 @@ post:
+   SBD_configuration: SBD 配置
+   SBD_watchdogs: SBD 看门狗
+   WATCHDOG: 看门狗
+-  add_same_cluster: 集群名称%1已经添加。 您不能添加两个具有相同名称的群集.
+-  add_same_node: 节点%1已经是%2群集的一部分。 您不能将节点添加到两个不同的群集中.
++  add_same_cluster: 集群名称%1已经添加。 您不能添加两个具有相同名称的集群.
++  add_same_node: 节点%1已经是%2集群的一部分。 您不能将节点添加到两个不同的集群中.
+   Please_repeat_the_last_action_if_appropriate: 请重复最后一次操作（如果适用）
+   Configuaration_conflict_detected: 检测到配置冲突。某些节点的配置比本地节点新。 本地节点的配置已更新.%1.
+-  Unabled_to_save_settings: 无法将设置保存在本地群集节点%1上。 确保pcsd在节点上运行并且节点已授权.
++  Unabled_to_save_settings: 无法将设置保存在本地集群节点%1上。 确保pcsd在节点上运行并且节点已授权.
+   Errors: 错误
+-  Totem_consensus: 此超时以毫秒为单位指定等待共识的时间在开始新的成员资格配置之前已实现。 最小值共识值必须为1.2*令牌。该值将自动如果用户未指定共识值，则以1.2*令牌计算。<br/><br/>对于两个节点群集，共识大于连接超时但小于令牌很安全。 对于三个节点或更大的群集，共识应该更大比令牌。 成员变更的风险越来越高，而这种变化仍然保证虚拟同步，如果共识小于令牌。<br/> <br/>默认值为1200毫秒。
++  totem_consensus: 此超时以毫秒为单位指定等待共识的时间在开始新的成员资格配置之前已实现。 最小值共识值必须为1.2*令牌。该值将自动如果用户未指定共识值，则以1.2*令牌计算。<br/><br/>对于两个节点集群，共识大于连接超时但小于令牌很安全。 对于三个节点或更大的集群，共识应该更大比令牌。 成员变更的风险越来越高，而这种变化仍然保证虚拟同步，如果共识小于令牌。<br/> <br/>默认值为1200毫秒。
++  knet_link_priority: 当在“被动”模式下使用knet时，指定链接的优先级。
++  knet_ping_interval: 指定两次knet链路ping之间的间隔.Ping间隔和Ping超时是一对，如果指定了另一个，则应也是，否则将根据令牌超时计算出一个，而另一个将是从配置文件中获取。<br/> <br/>默认值：令牌超时/（Pong计数* 2）
++  knet_ping_precision: 使用多少个延迟值来计算平均链路延迟。<br/> <br/>默认值：2048个样本
++  knet_ping_timeout: 如果在此时间内未收到ping命令，则将knet链接声明为无效。Ping间隔和Ping超时是一对，如果指定了另一个，则应也是，否则将根据令牌超时计算出一个，而另一个将是从配置文件中获取。<br/> <br/>默认值：令牌超时/（Pong计数* 2）
++  knet_pong_count: 链接标记为“ UP”之前有多少次有效的ping/pongs。<br/> <br/>默认值：5
++  knet_transport: knet应该使用哪个IP传输。<br/> <br/>默认值：udp
++  knet_mcastport: 用于通信的端口号。 默认值保持不变旧的5405 +链接号之一，但是您可以在此处为每个链接覆盖它。
++  knet_compression_model: knet使用的（可选）压缩类型。 可用值取决于构建以及可用的库。通常，zlib和lz4将是可用，但也可以使用bzip2及其他。<br/> <br/>默认值：无
++  knet_compression_threshold: 告诉knet不要压缩小于该值的任何数据包指示。 设置为0重置为默认值。 设置为1可压缩所有内容。<br/> <br/>默认值：100字节
++  knet_compression_level: 许多压缩库允许调整压缩参数。 例如0或1 ... 9通常用于确定压缩级别。 这个值未经修改地传递到压缩库，因此建议有关更多详细信息，请查阅图书馆的文档。
++  knet_crypto_model: 这指定knet应该使用哪个加密库。<br/> <br/>默认值：nss
++  knet_crypto_hash: 这指定应使用哪种HMAC身份验证来验证所有消息。<br/> <br/>默认值：sha256
++  knet_crypto_cipher: 这指定应使用哪种密码加密来加密所有消息。启用密码加密还需要启用哈希。<br/> <br/>默认值：aes256
++  knet_pmtud_interval: knet PMTUd多久运行一次以查找网络MTU变化。值以秒为单位。<br/> <br/>默认值：60s
++  knet_link_mode: 这将指定knet模式。<br/><br/>被动：将使用优先级最低的活动链接。如果一个或多个链接具有相同的优先级，则将使用最低链接ID的链接。<br/> <br/> 主动：全部活动链接将同时用于发送流量，忽略链接优先级。<br/> <br/>轮询调度：每个数据包将按顺序发送到下一个活动链接。<br/> <br/>如果仅指定一个接口指令，自动选择被动。
++  quorum_auto_tie_breaker: '启用自动断路器(ATB)功能（默认值：关闭）。<br/><br/>仲裁投票的一般行为允许同时发生的节点故障高达50％-1个节点，假设每个节点有1票。<br/><br/>启用ATB后，集群最多可能遭受50％的节点故障同时，以确定性的方式。集群分区或一组仍与具有最低nodeid的节点联系的节点将保持原样。其他节点将是隔离的。'
++  quorum_last_man_standing: 启用“ Last Man Standing（LMS）”功能（默认值：关闭）。 <br/> <br/>仲裁投票的一般行为是在启动时设置“预期投票节点”和“活节点”，并在集群的整个生命周期内使用这些值。<br/><br/>例如使用8节点集群，其中每个节点有1票，“预期投票节点”设置为8，“活节点”设置为5。这种情况允许3个节点无法使用。 如果第四个节点发生故障，集群将成为“孤岛”，它将停止提供服务。<br/> <br/>启用LMS可使集群在特定情况下动态地重新计算预期投票节点和活节点。在高可用性集群中使用LMS时，必须启用WFA。<br/> <br/>使用上面的8节点集群示例，在启用LMS的情况下，集群可以保留仲裁并继续运行，但会以级联方式丢失最多6个节点，只有2个处于活动状态。
++  quorum_last_man_standing_window: 调整“Last Man Standing Window”（默认值：10000毫秒<br/> <br/>如果启用了“Last Man Standing Window”选项，则重新计算一个节点（或一组节点的组）到定额之间的时间窗口。
++  quorum_wait_for_all: 启用等待所有节点（WFA）功能（默认值：关闭）。<br/><br/>仲裁投票的作用是使集群尽快从不满足活节点数的状态切换到满足活节点数。例如，在一个8节点的集群中，每个节点有1票，预期投票为8票，法定人数为(50% + 1)=5票。尽快使5个(或更多)节点对彼此可见时，5个(或更多)节点的分区就变成了可用，可以开始操作。<br/><br/>启用WFA时，只有在所有节点同时至少可见一次之后，集群才能使用。<br/><br/>此功能的优点是避免了某些启动争用节点的情况，其代价是，在集群可以运行之前，所有节点至少必须同时启动一次。<br/><br/>基于上述示例的常见启动竞争条件是，一旦5个节点同时启动成功，而其他3个仍处于脱机状态，其余3个节点将被隔离。<br/><br/>与“Last Man Standing”功能结合使用时，该功能非常有用。
++  totem_downcheck: 此超时以毫秒为单位，指定关闭网络接口后检查其是否已备份之前要等待的时间。<br/> <br/>默认值为1000毫秒。
++  totem_fail_recv_const: 此常数指定在形成新配置之前，应该接收消息时令牌的轮转次数为多少，而没有接收到任何消息。<br/> <br/>默认值为2500失败，无法接收消息。
++  totem_heartbeat_failures_allowed: "[心跳机制]配置可选的心跳机制以更快地检测故障。请记住，将这种机制用于有损网络可能会导致错误的错误报告，因为该机制依赖于网络进行心跳。<br/> <br/>因此，如果需要在使用率低至中等的网络中改善故障，请使用此机制。<br/><br/>此常数指定在声明心跳失败之前系统应容忍的心跳失败的次数，例如3。同样，如果未设置此值或为0，则心跳机制不参与系统，令牌轮换将是故障检测的方法。<br/> <br/>默认值为0（禁用）。"
++  totem_hold: 此项以毫秒为单位指定当协议处于低利用率时，该表示者应将令牌保留多长时间。不建议在未经corosync社区指导的情况下更改此值。<br/> <br/>默认值为180毫秒。
++  totem_join: 此项以毫秒为单位指定成员资格协议中的加入消息等待时间。<br/> <br/>默认值为50毫秒。
++  totem_max_messages: 此常数指定一个处理器在收到令牌后可以发送的最大消息数。max_messages参数限制为256000/netmtu，以防止内核传输缓冲区溢出。<br/><br/>默认值为17条消息。 
++  totem_max_network_delay: "[心跳机制]此常数以毫秒为单位指定网络将一个数据包从一台计算机传输到另一台计算机所花费的近似延迟。该值由系统工程师设置，如果不确定，请不要更改，否则这会影响使用心跳的故障检测机制。<br/><br/>默认值为50毫秒"
++  totem_merge: 此项以毫秒为单位指定在没有发送多播流量时检查分区之前要等待的时间。如果正在发送多播流量，则根据协议自动进行合并检测。<br/> <br/>默认值为200毫秒。
++  totem_miss_count_const: 该常数定义了在收到令牌后，在发生重传之前检查消息以进行重传的最大次数。 对于与单播数据包相比延迟多播数据包的交换机，此参数很有用。 默认设置几乎适用于所有现代交换机。<br/> <br/>默认值为5条消息。
++  totem_send_join: 此项以毫秒为单位指定介于0和send_join之间的上限，以在发送加入消息之前等待。 对于少于32个节点的配置，此参数不是必需的。 对于较大的环，此参数对于确保NIC在新环形成时不会因连接消息而溢出是必不可少的。大环（128个节点）的合理值应为80毫秒。 如果更改此值，其他计时器值也必须更改。 如果尝试运行较大的配置，请从corosync邮件列表中寻求建议。<br/> <br/>默认值为0毫秒。
++  totem_seqno_unchanged_const: 此常数指定在启动保持计时器之前应该进行多少次没有任何多播流量的令牌轮换。<br/> <br/>默认值为30转。
++  totem_token: 此项可以直接使用，也可以用作实际接收令牌时间计算的基础（在令牌系数部分中说明）。接收令牌时间以毫秒为单位指定，直到未收到令牌后宣布令牌丢失为止。这是在当前配置中检测处理器故障所花费的时间。除此项外，更新新配置还需要大约50毫秒。<br/> <br/>对于图腾使用的实际接收令牌时间，可以读取runtime.config.token键的cmap值。<br/> <br/>默认值为1000毫秒。
++  totem_token_coefficient: 仅当指定了节点列表部分且至少包含3个节点时，才使用此值。如果是这样，则将实际令牌超时计算为令牌+（node_of_nodes-2）* token_coefficient。这允许集群扩展，而无需每次添加新节点时都手动更改令牌超时。可以将该值设置为0，以有效删除此功能。<br/> <br/>默认值为650毫秒。
++  totem_token_retransmit: 此项以毫秒为单位指定接收令牌之前多长时间后重新传输令牌。如果令牌被修改，它将自动计算。不建议在未经corosync社区指导的情况下更改此值。<br/> <br/>默认值为238毫秒
++  totem_token_retransmits_before_loss_const: 此值标识在形成新配置之前应尝试多少次令牌重发。如果设置了此值，将从retransmits_before_loss和令牌中自动计算出重发和保留。<br/><br/>默认为4次重传。
++  totem_window_size: 该常数指定一个令牌轮换可以发送的最大消息数。如果所有处理器的性能均相同，则该值可能会很大（300），对于非常大的环，这将从引入到交付会引入更高的延迟。为了减少大振铃（16+）中的延迟，默认设置是一个安全的折衷方案。如果快速处理器中存在1个或多个慢速处理器，则window_size不应大于256000/netmtu，以避免内核接收缓冲区溢出。通过在通知日志中显示重发列表来通知用户。不会丢失数据，但是发生这些错误时，性能会降低。<br/> <br/>默认值为50条消息。
++
+diff --git a/pcsd/public/js/cluster-setup.js b/pcsd/public/js/cluster-setup.js
+index 1e6457e..86eb6de 100644
+--- a/pcsd/public/js/cluster-setup.js
++++ b/pcsd/public/js/cluster-setup.js
+@@ -490,18 +490,18 @@ clusterSetup.step.clusterNameNodes = function(){
+ clusterSetup.step.clusterSettings = function(clusterName, nodesNames, actions){
+   clusterSetup.step.set({
+     stepForm: "cluster-settings",
+-    title: "Create cluster "+clusterName+": Settings",
++    title: translate("Create cluster")+clusterName+":" + translate("Settings"),
+     buttons: [
+       {
+-        text: "Back",
++        text: translate("Back"),
+         click: actions.back,
+       },
+       {
+-        text: "Create cluster",
++        text: translate("Create cluster"),
+         click: actions.create,
+       },
+       {
+-        text: "Cancel",
++        text: translate("Cancel"),
+         click: actions.cancel,
+       },
+     ],
+@@ -714,7 +714,7 @@ clusterSetup.submit.run = function(useAdvancedOptions){
+       },
+       {
+         confirm: function(msgs){
+-          return tools.submit.confirmForce("setup cluster", msgs);
++          return tools.submit.confirmForce(translate("setup cluster"), msgs);
+         },
+       }
+     );
+diff --git a/pcsd/public/js/jquery-i18n.js b/pcsd/public/js/jquery-i18n.js
+index bc583dd..a8cdab9 100644
+--- a/pcsd/public/js/jquery-i18n.js
++++ b/pcsd/public/js/jquery-i18n.js
+@@ -294,7 +294,16 @@ let xz_lang = {
+     ],
+     'Add_Role': [
+     '添加角色',
+-    'Add_Role']
++    'Add_Role'],
++    'Back': [
++    '返回',
++    'Back'],
++    'Settings': [
++    '设置',
++    'Settings'],
++    'setup cluster': [
++    '新建集群',
++    'setup cluster']
+ };
+ function translate(name) {
+     let content = xz_lang[name][lang_type];
+diff --git a/pcsd/views/manage.erb b/pcsd/views/manage.erb
+index b00ca2d..7681377 100644
+--- a/pcsd/views/manage.erb
++++ b/pcsd/views/manage.erb
+@@ -290,388 +290,85 @@ increase this up to 255. The valid range is 0..255.
+ "%>
+ 
+ <!-- knet options -->
+-<% knet_pmtud_interval = "
+-How often the knet PMTUd runs to look for network MTU changes. Value in
+-seconds.
+-<br/><br/>
+-Default: 60
+-"%>
+-
+-<% knet_link_mode = "
+-This specifies the knet mode.
+-<br/><br/>
+-
+-passive: The active link with the lowest priority will be used. If one or more
+-links share the same priority the one with the lowest link ID will be used.
+-<br/><br/>
+-
+-active: All active links will be used simultaneously to send traffic, link
+-priority is ignored.
+-<br/><br/>
++<% knet_pmtud_interval = t.post.knet_pmtud_interval%>
+ 
+-round-robin: Each packet will be sent to the next active link in order.
+-<br/><br/>
+-
+-If only one interface directive is specified, passive is automatically chosen.
+-"%>
++<% knet_link_mode = t.post.knet_link_mode%>
+ 
+ 
+ <!-- knet link options -->
+-<% knet_link_priority = "
+-Specifies the priority for the link when knet is used in 'passive' mode.
+-"%>
+-
+-<% knet_ping_interval = "
+-Specifies the interval between knet link pings.
+-Ping Interval and Ping Timeout are a pair, if one is specified the other should
+-be too, otherwise one will be calculated from the token timeout and one will be
+-taken from the config file.
+-<br/><br/>
+-
+-Default: Token Timeout / (Pong Count * 2)
+-"%>
++<% knet_link_priority = t.post.knet_link_priority%>
+ 
+-<% knet_ping_precision = "
+-How many values of latency are used to calculate the average link latency.
+-<br/><br/>
+-
+-Default: 2048 samples
+-"%>
+-
+-<% knet_ping_timeout = "
+-If no ping is received within this time, the knet link is declared dead.
+-Ping Interval and Ping Timeout are a pair, if one is specified the other should
+-be too, otherwise one will be calculated from the token timeout and one will be
+-taken from the config file.
+-<br/><br/>
+-
+-Default: Token Timeout / (Pong Count * 2)
+-"%>
++<% knet_ping_interval = t.post.knet_ping_interval%>
+ 
+-<% knet_pong_count = "
+-How many valid ping/pongs before a link is marked UP.
+-<br/><br/>
++<% knet_ping_precision = t.post.knet_ping_precision%>
+ 
+-Default: 5
+-"%>
++<% knet_ping_timeout = t.post.knet_ping_timeout%>
+ 
+-<% knet_transport = "
+-Which IP transport knet should use.
+-<br/><br/>
++<% knet_pong_count = t.post.knet_pong_count%>
+ 
+-Default: udp
+-"%>
++<% knet_transport = t.post.knet_transport%>
+ 
+-<% knet_mcastport = "
+-Port number to be used for communication. The default remains
+-the old one of 5405 + linknumber, but you can override it per link here.
+-"%>
++<% knet_mcastport = t.post.knet_mcastport%>
+ 
+ 
+ <!-- knet compression options -->
+-<% knet_compression_model = "
+-The (optional) type of compression used by knet. The values available depend on
+-the build and also available libraries. Typically zlib and lz4 will be
+-available but bzip2 and others could also be allowed.
+-<br/><br/>
++<% knet_compression_model = t.post.knet_compression_model%>
+ 
+-Default: none
+-"%>
++<% knet_compression_threshold = t.post.knet_compression_threshold%>
+ 
+-<% knet_compression_threshold = "
+-Tells knet to NOT compress any packets that are smaller than the value
+-indicated. Set to 0 to reset to the default. Set to 1 to compress everything.
+-<br/><br/>
+-
+-Default: 100 bytes
+-"%>
+-
+-<% knet_compression_level = "
+-Many compression libraries allow tuning of compression parameters. For example 0
+-or 1 ... 9 are commonly used to determine the level of compression. This
+-value is passed unmodified to the compression library so it is recommended to
+-consult the library's documentation for more detailed information.
+-"%>
++<% knet_compression_level = t.post.knet_compression_level%>
+ 
+ <!-- knet crypto options -->
+-<% knet_crypto_model = "
+-This specifies which cryptographic library should be used by knet.
+-<br/><br/>
+-
+-Default: nss
+-"%>
+-
+-<% knet_crypto_hash = "
+-This specifies which HMAC authentication should be used to authenticate all
+-messages.
+-<br/><br/>
++<% knet_crypto_model = t.post.knet_crypto_model%>
+ 
+-Default: sha256
+-"%>
+-
+-<% knet_crypto_cipher = "
+-This specifies which cipher should be used to encrypt all messages. Enabling
+-Cipher requires also enabling of Hash.
+-<br/><br/>
++<% knet_crypto_hash = t.post.knet_crypto_hash%>
+ 
+-Default: aes256
+-"%>
++<% knet_crypto_cipher = t.post.knet_crypto_cipher%>
+ 
+ <!-- totem options -->
+-<% totem_consensus = t.post.Totem_consensus%>
+-
+-<% totem_downcheck = "
+-This timeout specifies in milliseconds how long to wait before checking that a
+-network interface is back up  after  it has been downed.
+-<br/><br/>
+-
+-The default is 1000 milliseconds.
+-"%>
+-
+-<% totem_fail_recv_const = "
+-This  constant specifies how many rotations of the token without receiving any
+-of the messages when messages should be received may occur before a new
+-configuration is formed.
+-<br/><br/>
+-
+-The default is 2500 failures to receive a message.
+-"%>
+-
+-<% totem_heartbeat_failures_allowed = "
+-[HeartBeating  mechanism]  Configures  the  optional HeartBeating mechanism for
+-faster failure detection. Keep in mind that engaging this mechanism in lossy
+-networks could cause faulty loss declaration as the mechanism relies on the
+-network for heartbeating.
+-<br/><br/>
+-
+-So as a rule of thumb use this mechanism if you require improved failure in low
+-to medium utilized networks.
+-<br/><br/>
+-
+-This constant specifies the number of heartbeat failures the system should
+-tolerate before declaring heartbeat failure e.g 3. Also if this value is not set
+-or is 0 then the heartbeat mechanism is not engaged in the system and token
+-rotation is the method of failure detection
+-<br/><br/>
+-
+-The default is 0 (disabled).
+-"%>
+-
+-<% totem_hold = "
+-This timeout specifies in milliseconds how long the token should be held by the
+-representative when  the  protocol  is under low utilization. It is not
+-recommended to alter this value without guidance from the corosync community.
+-<br/><br/>
+-
+-The default is 180 milliseconds.
+-"%>
+-
+-<% totem_join = "
+-This timeout specifies in milliseconds how long to wait for join messages in the
+-membership protocol.
+-<br/><br/>
+-
+-The default is 50 milliseconds.
+-"%>
+-
+-<% totem_max_messages = "
+-This constant specifies the maximum number of messages that may be sent by one
+-processor on receipt of the token. The max_messages parameter is limited to
+-256000 / netmtu to prevent overflow of the kernel transmit buffers.
+-<br/><br/>
+-
+-The default is 17 messages.
+-"%>
+-
+-<% totem_max_network_delay = "
+-[HeartBeating mechanism] This constant specifies in milliseconds the
+-approximate delay that your network takes to transport one packet from one
+-machine to another. This value is to be set by system engineers and please
+-don't change if not sure as this effects the failure detection mechanism using
+-heartbeat.
+-<br/><br/>
+-
+-The default is 50 milliseconds
+-"%>
+-
+-<% totem_merge = "
+-This timeout specifies in milliseconds how long to wait before checking for a
+-partition when no multicast traffic is being sent. If multicast traffic is
+-being sent, the merge detection happens automatically as a function of the
+-protocol.
+-<br/><br/>
++<% totem_consensus = t.post.totem_consensus%>
+ 
+-The default is 200 milliseconds.
+-"%>
++<% totem_downcheck = t.post.totem_downcheck%>
+ 
+-<% totem_miss_count_const = "
+-This constant defines the maximum number of times on receipt of a token a
+-message is checked for retransmission before a retransmission occurs. This
+-parameter is useful to modify for switches that delay multicast packets
+-compared to unicast packets. The default setting works well for nearly all
+-modern switches.
+-<br/><br/>
++<% totem_fail_recv_const = t.post.totem_fail_recv_const%>
+ 
+-The default is 5 messages.
+-"%>
++<% totem_heartbeat_failures_allowed = t.post.totem_heartbeat_failures_allowed%>
+ 
+-<% totem_send_join = "
+-This timeout specifies in milliseconds an upper range between 0 and send_join to
+-wait before sending a join message. For configurations with less than 32 nodes,
+-this parameter is not necessary. For larger rings, this parameter is necessary
+-to ensure the NIC is not overflowed with join messages on formation of a new
+-ring. A reasonable value for large rings (128 nodes) would be 80msec. Other
+-timer values must also change if this value is changed. Seek advice from the
+-corosync mailing list if trying to run larger configurations.
+-<br/><br/>
++<% totem_hold = t.post.totem_hold%>
+ 
+-The default is 0 milliseconds.
+-"%>
++<% totem_join = t.post.totem_join%>
+ 
+-<% totem_seqno_unchanged_const = "
+-This constant specifies how many rotations of the token without any multicast
+-traffic should occur before the hold timer is started.
+-<br/><br/>
++<% totem_max_messages = t.post.totem_max_messages%>
+ 
+-The default is 30 rotations.
+-"%>
++<% totem_max_network_delay = t.post.totem_max_network_delay%>
+ 
+-<% totem_token = "
+-This timeout is used directly or as a base for real token timeout calculation
+-(explained in token_coefficient section). Token timeout specifies in
+-milliseconds until a token loss is declared after not receiving a token. This is
+-the time spent detecting a failure of a processor in the current configuration.
+-Reforming a new configuration takes about 50 milliseconds in addition to this
+-timeout.
+-<br/><br/>
++<% totem_merge = t.post.totem_merge%>
+ 
+-For real token timeout used by totem it's possible to read cmap value of
+-runtime.config.token key.
+-<br/><br/>
++<% totem_miss_count_const = t.post.totem_miss_count_const%>
+ 
+-The default is 1000 milliseconds.
+-"%>
++<% totem_send_join = t.post.totem_send_join%>
+ 
+-<% totem_token_coefficient = "
+-This value is used only when nodelist section is specified and contains at least
+-3 nodes. If so, real token timeout is then computed as token + (number_of_nodes
+-- 2) * token_coefficient. This allows cluster to scale without manually changing
+-token timeout every time new node is added. This value can be set to 0 resulting
+-in effective removal of this feature.
+-<br/><br/>
++<% totem_seqno_unchanged_const = t.post.totem_seqno_unchanged_const%>
+ 
+-The default is 650 milliseconds.
+-"%>
++<% totem_token = t.post.totem_token%>
+ 
+-<% totem_token_retransmit = "
+-This timeout specifies in milliseconds after how long before receiving a token
+-the token is retransmitted. This will be automatically calculated if token is
+-modified. It is not recommended to alter this value without guidance from the
+-corosync community.
+-<br/><br/>
++<% totem_token_coefficient = t.post.totem_token_coefficient%>
+ 
+-The default is 238 milliseconds
+-"%>
++<% totem_token_retransmit = t.post.totem_token_retransmit%>
+ 
+-<% totem_token_retransmits_before_loss_const = "
+-This value identifies how many token retransmits should be attempted before
+-forming a new configuration. If this value is set, retransmit and hold will be
+-automatically calculated from retransmits_before_loss and token.
+-<br/><br/>
++<% totem_token_retransmits_before_loss_const = t.post.totem_token_retransmits_before_loss_const%>
+ 
+-The default is 4 retransmissions.
+-"%>
+-
+-<% totem_window_size = "
+-This constant specifies the maximum number of messages that may be sent on one
+-token rotation. If all processors perform equally well, this value could be
+-large (300), which would introduce higher latency from origination to delivery
+-for very large rings. To reduce latency in large rings(16+), the defaults are a
+-safe compromise. If 1 or more slow processor(s) are present among fast
+-processors, window_size should be no larger than 256000 / netmtu to avoid
+-overflow of the kernel receive buffers. The user is notified of this by the
+-display of a retransmit list in the notification logs. There is no loss of data,
+-but performance is reduced when these errors occur.
+-<br/><br/>
+-
+-The default is 50 messages.
+-"%>
++<% totem_window_size = t.post.totem_window_size%>
+ 
+ 
+ <!-- quorum options -->
+-<% quorum_auto_tie_breaker = "
+-Enables Auto Tie Breaker (ATB) feature (default: off).
+-<br/><br/>
+-
+-The general behaviour of votequorum allows a simultaneous node failure up to 50%
+-- 1 node, assuming each node has 1 vote.
+-<br/><br/>
+-
+-When ATB is enabled, the cluster can suffer up to 50% of the nodes failing at
+-the same time, in a deterministic fashion. The cluster partition, or the set of
+-nodes that are still in contact with the node that has the lowest nodeid will
+-remain quorate. The other nodes will be inquorate.
+-"%>
++<% quorum_auto_tie_breaker = t.post.quorum_auto_tie_breaker%>
+ 
+-<% quorum_last_man_standing = "
+-Enables Last Man Standing (LMS) feature (default: off).
+-<br/><br/>
+-
+-The general behaviour of votequorum is to set Expected Votes and Quorum at
+-startup and use those values during the whole lifetime of the cluster.
+-<br/><br/>
+-
+-Using for example an 8 node cluster where each node has 1 vote, Expected Votes
+-is set to 8 and Quorum to 5. This condition allows a total failure of 3 nodes.
+-If a 4th node fails, the cluster becomes inquorate and it will stop providing
+-services.
+-<br/><br/>
+-
+-Enabling LMS allows the cluster to dynamically recalculate Expected Votes and
+-Quorum under specific circumstances. It is essential to enable WFA when using
+-LMS in High Availability clusters.
+-<br/><br/>
++<% quorum_last_man_standing = t.post.quorum_last_man_standing%>
+ 
+-Using the above 8 node cluster example, with LMS enabled the cluster can retain
+-quorum and continue operating by losing, in a cascade fashion, up to 6 nodes
+-with only 2 remaining active.
+-"%>
++<% quorum_last_man_standing_window = t.post.quorum_last_man_standing_window%>
+ 
+-<% quorum_last_man_standing_window = "
+-Tunes Last Man Standing Window (default: 10000 ms)
+-<br/><br/>
+-
+-The window of time between when a node (or group of nodes die) and quorum is
+-recalculated if the Last Man Standing option is enabled.
+-"%>
+-
+-<% quorum_wait_for_all = "
+-Enables Wait For All (WFA) feature (default: off).
+-<br/><br/>
+-
+-The general behaviour of votequorum is to switch a cluster from inquorate to
+-quorate as soon as possible. For example, in an 8 node cluster, where every node
+-has 1 vote, Expected Votes is set to 8 and Quorum is (50% + 1) 5. As soon as 5
+-(or more) nodes are visible to each other, the partition of 5 (or more) becomes
+-quorate and can start operating.
+-<br/><br/>
+-
+-When WFA is enabled, the cluster will be quorate for the first time only after
+-all nodes have been visible at least once at the same time.
+-<br/><br/>
+-
+-This feature has the advantage of avoiding some startup race conditions, with
+-the cost that all nodes need to be up at the same time at least once before the
+-cluster can operate.
+-<br/><br/>
+-
+-A common startup race condition based on the above example is that as soon as 5
+-nodes become quorate, with the other 3 still offline, the remaining 3 nodes will
+-be fenced.
+-<br/><br/>
+-
+-It is very useful when combined with Last Man Standing.
+-"%>
++<% quorum_wait_for_all = t.post.quorum_wait_for_all%>
+ 
+ 
+ <!-- CLUSTER SETUP HELP TEXTS - END -->
+-- 
+2.18.2
+
